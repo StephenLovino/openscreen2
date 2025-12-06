@@ -6,6 +6,7 @@ import type { ZoomRegion, CropRegion, TrimRegion } from '@/components/video-edit
 
 interface VideoExporterConfig extends ExportConfig {
   videoUrl: string;
+  cameraVideoUrl?: string;
   wallpaper: string;
   zoomRegions: ZoomRegion[];
   trimRegions?: TrimRegion[];
@@ -17,12 +18,14 @@ interface VideoExporterConfig extends ExportConfig {
   padding?: number;
   videoPadding?: number;
   cropRegion: CropRegion;
+  hideCamera?: boolean;
   onProgress?: (progress: ExportProgress) => void;
 }
 
 export class VideoExporter {
   private config: VideoExporterConfig;
   private decoder: VideoFileDecoder | null = null;
+  private cameraDecoder: VideoFileDecoder | null = null;
   private renderer: FrameRenderer | null = null;
   private encoder: VideoEncoder | null = null;
   private muxer: VideoMuxer | null = null;
@@ -75,9 +78,23 @@ export class VideoExporter {
       this.cleanup();
       this.cancelled = false;
 
-      // Initialize decoder and load video
+      // Initialize decoder and load main video
       this.decoder = new VideoFileDecoder();
       const videoInfo = await this.decoder.loadVideo(this.config.videoUrl);
+
+      // Optionally initialize camera decoder if camera video provided
+      let cameraVideoElement: HTMLVideoElement | null = null;
+      if (this.config.cameraVideoUrl) {
+        try {
+          this.cameraDecoder = new VideoFileDecoder();
+          const cameraInfo = await this.cameraDecoder.loadVideo(this.config.cameraVideoUrl);
+          console.log('[VideoExporter] Camera video loaded:', cameraInfo);
+          cameraVideoElement = this.cameraDecoder.getVideoElement();
+        } catch (err) {
+          console.warn('[VideoExporter] Failed to load camera video:', err);
+          this.cameraDecoder = null;
+        }
+      }
 
       // Initialize frame renderer
       this.renderer = new FrameRenderer({
@@ -94,6 +111,7 @@ export class VideoExporter {
         cropRegion: this.config.cropRegion,
         videoWidth: videoInfo.width,
         videoHeight: videoInfo.height,
+        hideCamera: false, // masking now handled as true separate camera overlay
       });
       await this.renderer.initialize();
 
@@ -150,6 +168,18 @@ export class VideoExporter {
           });
         }
 
+        // Keep camera video in sync if available
+        if (cameraVideoElement) {
+          const needsCameraSeek = Math.abs(cameraVideoElement.currentTime - videoTime) > 0.001;
+          if (needsCameraSeek) {
+            const cameraSeeked = new Promise<void>(resolve => {
+              cameraVideoElement!.addEventListener('seeked', () => resolve(), { once: true });
+            });
+            cameraVideoElement.currentTime = videoTime;
+            await cameraSeeked;
+          }
+        }
+
         // Create a VideoFrame from the video element (on GPU!)
         const videoFrame = new VideoFrame(videoElement, {
           timestamp,
@@ -162,6 +192,91 @@ export class VideoExporter {
         videoFrame.close();
 
         const canvas = this.renderer!.getCanvas();
+
+        // Draw camera overlay as a separate layer if enabled
+        if (this.config.cameraVideoUrl && !this.config.hideCamera && cameraVideoElement) {
+          const ctx = canvas.getContext('2d');
+          if (ctx && cameraVideoElement.videoWidth && cameraVideoElement.videoHeight) {
+            const cw = canvas.width;
+            const ch = canvas.height;
+            
+            // Get camera shape from sessionStorage
+            let shape: 'circle' | 'squircle' | 'square' = 'squircle';
+            try {
+              const metadataStr = sessionStorage.getItem('cameraMetadata');
+              if (metadataStr) {
+                const metadata = JSON.parse(metadataStr);
+                if (metadata.shape && ['circle', 'squircle', 'square'].includes(metadata.shape)) {
+                  shape = metadata.shape;
+                }
+              }
+            } catch (e) {
+              console.warn('[VideoExporter] Failed to parse camera metadata for shape:', e);
+            }
+            
+            // For circle, make it square; for others, maintain aspect ratio
+            const baseSize = Math.min(cw * 0.2, 300);
+            const isCircle = shape === 'circle';
+            const overlayWidth = baseSize;
+            const overlayHeight = isCircle ? baseSize : (cameraVideoElement.videoHeight / cameraVideoElement.videoWidth) * baseSize;
+            const x = cw - overlayWidth - 20;
+            const y = ch - overlayHeight - 20;
+            
+            // Calculate border radius
+            let borderRadius = 48; // Default to squircle (3rem = 48px)
+            if (shape === 'circle') {
+              borderRadius = Math.min(overlayWidth, overlayHeight) / 2;
+            } else if (shape === 'squircle') {
+              borderRadius = 48; // 3rem
+            } else if (shape === 'square') {
+              borderRadius = 16; // 1rem
+            }
+            
+            // Draw camera with rounded corners using clipping path
+            ctx.save();
+            ctx.beginPath();
+            if (borderRadius > 0) {
+              const r = Math.min(borderRadius, overlayWidth / 2, overlayHeight / 2);
+              ctx.moveTo(x + r, y);
+              ctx.lineTo(x + overlayWidth - r, y);
+              ctx.quadraticCurveTo(x + overlayWidth, y, x + overlayWidth, y + r);
+              ctx.lineTo(x + overlayWidth, y + overlayHeight - r);
+              ctx.quadraticCurveTo(x + overlayWidth, y + overlayHeight, x + overlayWidth - r, y + overlayHeight);
+              ctx.lineTo(x + r, y + overlayHeight);
+              ctx.quadraticCurveTo(x, y + overlayHeight, x, y + overlayHeight - r);
+              ctx.lineTo(x, y + r);
+              ctx.quadraticCurveTo(x, y, x + r, y);
+              ctx.closePath();
+              ctx.clip();
+            }
+            // For circle, draw centered and cropped; for others, fill the rect
+            if (isCircle) {
+              // Draw video centered and cropped to square
+              const sourceAspect = cameraVideoElement.videoWidth / cameraVideoElement.videoHeight;
+              let drawWidth = overlayWidth;
+              let drawHeight = overlayHeight;
+              let drawX = x;
+              let drawY = y;
+              
+              if (sourceAspect > 1) {
+                // Video is wider - fit to height and crop width
+                drawHeight = overlayHeight;
+                drawWidth = overlayHeight * sourceAspect;
+                drawX = x - (drawWidth - overlayWidth) / 2;
+              } else {
+                // Video is taller - fit to width and crop height
+                drawWidth = overlayWidth;
+                drawHeight = overlayWidth / sourceAspect;
+                drawY = y - (drawHeight - overlayHeight) / 2;
+              }
+              
+              ctx.drawImage(cameraVideoElement, drawX, drawY, drawWidth, drawHeight);
+            } else {
+              ctx.drawImage(cameraVideoElement, x, y, overlayWidth, overlayHeight);
+            }
+            ctx.restore();
+          }
+        }
 
         // Create VideoFrame from canvas on GPU without reading pixels
         // @ts-ignore - colorSpace not in TypeScript definitions but works at runtime
@@ -350,6 +465,15 @@ export class VideoExporter {
         console.warn('Error destroying decoder:', e);
       }
       this.decoder = null;
+    }
+
+    if (this.cameraDecoder) {
+      try {
+        this.cameraDecoder.destroy();
+      } catch (e) {
+        console.warn('Error destroying camera decoder:', e);
+      }
+      this.cameraDecoder = null;
     }
 
     if (this.renderer) {

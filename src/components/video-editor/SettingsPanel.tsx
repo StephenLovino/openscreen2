@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import Colorful from '@uiw/react-color-colorful';
 import { hsvaToHex } from '@uiw/color-convert';
-import { Trash2, Download, Crop, X, Bug, Upload } from "lucide-react";
+import { Trash2, Download, Crop, X, Bug, Upload, Circle, Square, RectangleHorizontal } from "lucide-react";
 import { GiHearts } from "react-icons/gi";
 import { toast } from "sonner";
 import type { ZoomDepth, CropRegion } from "./types";
@@ -64,6 +64,10 @@ interface SettingsPanelProps {
   onPaddingChange?: (padding: number) => void;
   cropRegion?: CropRegion;
   onCropChange?: (region: CropRegion) => void;
+  hideCamera?: boolean;
+  onHideCameraChange?: (hide: boolean) => void;
+  cameraShape?: 'circle' | 'squircle' | 'square';
+  onCameraShapeChange?: (shape: 'circle' | 'squircle' | 'square') => void;
   videoElement?: HTMLVideoElement | null;
   onExport?: () => void;
 }
@@ -79,7 +83,7 @@ const ZOOM_DEPTH_OPTIONS: Array<{ depth: ZoomDepth; label: string }> = [
   { depth: 6, label: "5×" },
 ];
 
-export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, onZoomDepthChange, selectedZoomId, onZoomDelete, shadowIntensity = 0, onShadowChange, showBlur, onBlurChange, motionBlurEnabled = true, onMotionBlurChange, borderRadius = 0, onBorderRadiusChange, padding = 50, onPaddingChange, cropRegion, onCropChange, videoElement, onExport }: SettingsPanelProps) {
+export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, onZoomDepthChange, selectedZoomId, onZoomDelete, shadowIntensity = 0, onShadowChange, showBlur, onBlurChange, motionBlurEnabled = true, onMotionBlurChange, borderRadius = 0, onBorderRadiusChange, padding = 50, onPaddingChange, cropRegion, onCropChange, hideCamera = false, onHideCameraChange, cameraShape = 'squircle', onCameraShapeChange, videoElement, onExport }: SettingsPanelProps) {
   const [wallpaperPaths, setWallpaperPaths] = useState<string[]>([]);
   const [customImages, setCustomImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -280,6 +284,101 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
           </div>
         </div>
       </div>
+
+      {onHideCameraChange && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+            <div className="text-xs font-medium text-slate-200">Hide Camera</div>
+            <Switch
+              checked={hideCamera}
+              onCheckedChange={onHideCameraChange}
+              className="data-[state=checked]:bg-[#34B27B]"
+            />
+          </div>
+          {hideCamera && (
+            <p className="text-[10px] text-slate-500 text-center mt-2 px-4 leading-relaxed">
+              Camera feed will be cropped out from the bottom of the video
+            </p>
+          )}
+        </div>
+      )}
+
+      {onCameraShapeChange && !hideCamera && (
+        <div className="mb-4">
+          <div className="text-xs font-medium text-slate-200 mb-3">Camera Shape</div>
+          <div className="grid grid-cols-3 gap-2">
+            <Button
+              type="button"
+              onClick={() => {
+                onCameraShapeChange('circle');
+                try {
+                  const existingMetadata = sessionStorage.getItem('cameraMetadata');
+                  const metadata = existingMetadata ? JSON.parse(existingMetadata) : {};
+                  metadata.shape = 'circle';
+                  sessionStorage.setItem('cameraMetadata', JSON.stringify(metadata));
+                } catch (e) {
+                  console.warn('Failed to store camera shape:', e);
+                }
+              }}
+              className={cn(
+                "h-auto w-full rounded-xl border px-3 py-3 text-center shadow-sm transition-all flex flex-col items-center justify-center gap-1.5",
+                cameraShape === 'circle'
+                  ? "border-[#34B27B] bg-[#34B27B] text-white shadow-[#34B27B]/20 scale-105 ring-2 ring-[#34B27B]/20"
+                  : "border-white/5 bg-white/5 text-slate-400 hover:bg-white/10 hover:border-white/10 hover:text-slate-200"
+              )}
+            >
+              <Circle className="w-4 h-4" />
+              <span className="text-xs font-medium">Circle</span>
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                onCameraShapeChange('squircle');
+                try {
+                  const existingMetadata = sessionStorage.getItem('cameraMetadata');
+                  const metadata = existingMetadata ? JSON.parse(existingMetadata) : {};
+                  metadata.shape = 'squircle';
+                  sessionStorage.setItem('cameraMetadata', JSON.stringify(metadata));
+                } catch (e) {
+                  console.warn('Failed to store camera shape:', e);
+                }
+              }}
+              className={cn(
+                "h-auto w-full rounded-xl border px-3 py-3 text-center shadow-sm transition-all flex flex-col items-center justify-center gap-1.5",
+                cameraShape === 'squircle'
+                  ? "border-[#34B27B] bg-[#34B27B] text-white shadow-[#34B27B]/20 scale-105 ring-2 ring-[#34B27B]/20"
+                  : "border-white/5 bg-white/5 text-slate-400 hover:bg-white/10 hover:border-white/10 hover:text-slate-200"
+              )}
+            >
+              <Square className="w-4 h-4" />
+              <span className="text-xs font-medium">Squircle</span>
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                onCameraShapeChange('square');
+                try {
+                  const existingMetadata = sessionStorage.getItem('cameraMetadata');
+                  const metadata = existingMetadata ? JSON.parse(existingMetadata) : {};
+                  metadata.shape = 'square';
+                  sessionStorage.setItem('cameraMetadata', JSON.stringify(metadata));
+                } catch (e) {
+                  console.warn('Failed to store camera shape:', e);
+                }
+              }}
+              className={cn(
+                "h-auto w-full rounded-xl border px-3 py-3 text-center shadow-sm transition-all flex flex-col items-center justify-center gap-1.5",
+                cameraShape === 'square'
+                  ? "border-[#34B27B] bg-[#34B27B] text-white shadow-[#34B27B]/20 scale-105 ring-2 ring-[#34B27B]/20"
+                  : "border-white/5 bg-white/5 text-slate-400 hover:bg-white/10 hover:border-white/10 hover:text-slate-200"
+              )}
+            >
+              <RectangleHorizontal className="w-4 h-4" />
+              <span className="text-xs font-medium">Square</span>
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="mb-6">
         <Button

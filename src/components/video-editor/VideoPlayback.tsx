@@ -32,15 +32,19 @@ interface VideoPlaybackProps {
   padding?: number;
   cropRegion?: import('./types').CropRegion;
   trimRegions?: TrimRegion[];
+  hideCamera?: boolean;
+  cameraVideoPath?: string | null;
 }
 
 export interface VideoPlaybackRef {
   video: HTMLVideoElement | null;
+  cameraVideo: HTMLVideoElement | null;
   app: Application | null;
   videoSprite: Sprite | null;
   videoContainer: Container | null;
   play: () => Promise<void>;
   pause: () => void;
+  seek: (time: number) => void;
 }
 
 const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
@@ -63,8 +67,11 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
   padding = 50,
   cropRegion,
   trimRegions = [],
+  hideCamera = false,
+  cameraVideoPath = null,
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
   const videoSpriteRef = useRef<Sprite | null>(null);
@@ -88,6 +95,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
   const baseMaskRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
   const cropBoundsRef = useRef({ startX: 0, endX: 0, startY: 0, endY: 0 });
   const maskGraphicsRef = useRef<Graphics | null>(null);
+  const cameraMaskRef = useRef<Graphics | null>(null);
   const isPlayingRef = useRef(isPlaying);
   const isSeekingRef = useRef(false);
   const allowPlaybackRef = useRef(false);
@@ -178,6 +186,104 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       updateOverlayForRegion(activeRegion);
     }
   }, [updateOverlayForRegion, cropRegion, borderRadius, padding]);
+  
+  const updateCameraMask = useCallback(() => {
+    const cameraMask = cameraMaskRef.current;
+    const app = appRef.current;
+    const videoSprite = videoSpriteRef.current;
+    const cameraContainer = cameraContainerRef.current;
+    if (!cameraMask || !app || !videoSprite || !cameraContainer) {
+      console.log('🔴 updateCameraMask: Missing refs', { cameraMask: !!cameraMask, app: !!app, videoSprite: !!videoSprite, cameraContainer: !!cameraContainer });
+      return;
+    }
+
+    // If we have a separate camera video path, we no longer need to draw a mask
+    // over the baked-in camera area – the camera is rendered as its own layer.
+    // In this case, ensure the mask is hidden and exit early.
+    if (cameraVideoPath) {
+      cameraMask.clear();
+      cameraMask.visible = false;
+      return;
+    }
+    
+    cameraMask.clear();
+    cameraMask.visible = hideCamera; // Show/hide the mask based on hideCamera
+    
+    if (hideCamera) {
+      console.log('🟢 updateCameraMask: hideCamera is true, drawing mask');
+      // Try to get camera metadata from sessionStorage (stored during recording)
+      let cameraMetadata: any = null;
+      try {
+        const metadataStr = sessionStorage.getItem('cameraMetadata');
+        if (metadataStr) {
+          cameraMetadata = JSON.parse(metadataStr);
+        }
+      } catch (e) {
+        console.warn('Failed to parse camera metadata:', e);
+      }
+      
+      // Get the camera container's transform to account for zoom/pan
+      const containerX = cameraContainer.x;
+      const containerY = cameraContainer.y;
+      const containerScale = cameraContainer.scale.x;
+      
+      // Get video sprite position relative to its container
+      const spriteX = videoSprite.x;
+      const spriteY = videoSprite.y;
+      const spriteScale = videoSprite.scale.x;
+      const videoWidth = videoSprite.texture.width;
+      const videoHeight = videoSprite.texture.height;
+      
+      // Calculate absolute position on stage (accounting for all transforms)
+      let maskX: number, maskY: number, maskWidth: number, maskHeight: number;
+      
+      if (cameraMetadata && cameraMetadata.absoluteX !== undefined) {
+        // Use stored absolute positions (from recording time)
+        // Account for container transform and sprite transform
+        const totalScale = containerScale * spriteScale;
+        maskX = containerX + spriteX + (cameraMetadata.absoluteX * totalScale);
+        maskY = containerY + spriteY + (cameraMetadata.absoluteY * totalScale);
+        maskWidth = cameraMetadata.absoluteWidth * totalScale;
+        maskHeight = cameraMetadata.absoluteHeight * totalScale;
+      } else if (cameraMetadata && cameraMetadata.x !== undefined) {
+        // Use normalized positions (0-1)
+        const totalScale = containerScale * spriteScale;
+        maskX = containerX + spriteX + (cameraMetadata.x * videoWidth * totalScale);
+        maskY = containerY + spriteY + (cameraMetadata.y * videoHeight * totalScale);
+        maskWidth = cameraMetadata.width * videoWidth * totalScale;
+        maskHeight = cameraMetadata.height * videoHeight * totalScale;
+      } else {
+        // Fallback: assume bottom-right corner (typical camera position)
+        const cameraSizeInVideo = Math.min(videoWidth * 0.15, videoHeight * 0.15, 300);
+        const totalScale = containerScale * spriteScale;
+        const cameraSize = cameraSizeInVideo * totalScale;
+        maskX = containerX + spriteX + (videoWidth * totalScale) - cameraSize - (20 * totalScale);
+        maskY = containerY + spriteY + (videoHeight * totalScale) - cameraSize - (20 * totalScale);
+        maskWidth = cameraSize;
+        maskHeight = cameraSize;
+      }
+      
+      // Draw a black rectangle to mask the camera area
+      console.log('🟢 Drawing camera mask at:', { maskX, maskY, maskWidth, maskHeight, containerX, containerY, containerScale, spriteX, spriteY, spriteScale, videoWidth, videoHeight });
+      cameraMask.rect(maskX, maskY, maskWidth, maskHeight);
+      cameraMask.fill({ color: 0x000000, alpha: 1 });
+      console.log('🟢 Camera mask drawn, visible:', cameraMask.visible);
+    } else {
+      console.log('🔴 updateCameraMask: hideCamera is false, clearing mask');
+      cameraMask.visible = false;
+    }
+  }, [hideCamera, cameraVideoPath]);
+  
+  // Update camera mask when layout or hideCamera changes
+  useEffect(() => {
+    if (pixiReady && videoReady && videoSpriteRef.current && cameraMaskRef.current) {
+      // Small delay to ensure video sprite is fully initialized
+      const timer = setTimeout(() => {
+        updateCameraMask();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [hideCamera, pixiReady, videoReady, updateCameraMask]);
 
   useEffect(() => {
     layoutVideoContentRef.current = layoutVideoContent;
@@ -190,6 +296,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
 
   useImperativeHandle(ref, () => ({
     video: videoRef.current,
+    cameraVideo: cameraVideoRef.current,
     app: appRef.current,
     videoSprite: videoSpriteRef.current,
     videoContainer: videoContainerRef.current,
@@ -214,6 +321,18 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
         return;
       }
       video.pause();
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.pause();
+      }
+    },
+    seek: (time: number) => {
+      const video = videoRef.current;
+      if (video) {
+        video.currentTime = time;
+      }
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.currentTime = time;
+      }
     },
   }));
 
@@ -379,6 +498,12 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       });
     });
   }, [pixiReady, videoReady, layoutVideoContent, cropRegion]);
+  
+  // Update camera mask when hideCamera changes
+  useEffect(() => {
+    if (!pixiReady || !videoReady) return;
+    updateCameraMask();
+  }, [hideCamera, pixiReady, videoReady, updateCameraMask]);
 
   useEffect(() => {
     if (!pixiReady || !videoReady) return;
@@ -455,6 +580,14 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       videoContainerRef.current = videoContainer;
       cameraContainer.addChild(videoContainer);
       
+      // Camera mask overlay - separate container always on top
+      const cameraMaskOverlay = new Graphics();
+      cameraMaskRef.current = cameraMaskOverlay;
+      cameraMaskOverlay.zIndex = 10000; // Ensure it's always on top
+      cameraMaskOverlay.visible = true; // Make sure it's visible
+      app.stage.addChild(cameraMaskOverlay);
+      console.log('🟢 Camera mask overlay created and added to stage');
+      
       setPixiReady(true);
     })();
 
@@ -477,6 +610,10 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     video.pause();
     video.currentTime = 0;
     allowPlaybackRef.current = false;
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.pause();
+      cameraVideoRef.current.currentTime = 0;
+    }
   }, [videoPath]);
 
 
@@ -524,6 +661,13 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     
     layoutVideoContent();
     video.pause();
+    
+    // Update camera mask after video sprite is created
+    if (hideCamera) {
+      setTimeout(() => {
+        updateCameraMask();
+      }, 200);
+    }
 
     const { handlePlay, handlePause, handleSeeked, handleSeeking } = createVideoEventHandlers({
       video,
@@ -630,6 +774,11 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
 
       const state = animationStateRef.current;
 
+      // Update camera mask on each frame if needed (for zoom/pan changes)
+      if (hideCamera && videoSpriteRef.current && cameraMaskRef.current) {
+        updateCameraMask();
+      }
+
       const prevScale = state.scale;
       const prevFocusX = state.focusX;
       const prevFocusY = state.focusY;
@@ -671,6 +820,11 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
       );
 
       applyTransform(motionIntensity);
+      
+      // Update camera mask every frame if hideCamera is enabled
+      if (hideCamera) {
+        updateCameraMask();
+      }
     };
 
     app.ticker.add(ticker);
@@ -679,7 +833,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
         app.ticker.remove(ticker);
       }
     };
-  }, [pixiReady, videoReady, clampFocusToStage]);
+  }, [pixiReady, videoReady, clampFocusToStage, hideCamera, updateCameraMask]);
 
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
     const video = e.currentTarget;
@@ -688,6 +842,10 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     video.pause();
     allowPlaybackRef.current = false;
     currentTimeRef.current = 0;
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.currentTime = 0;
+      cameraVideoRef.current.pause();
+    }
     
     // hacky fix: To ensure video is fully ready for PixiJS
     requestAnimationFrame(() => {
@@ -746,6 +904,23 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
     ? { backgroundImage: `url(${resolvedWallpaper || ''})` }
     : { background: resolvedWallpaper || '' };
 
+  // Keep camera preview playback roughly in sync with the main video
+  useEffect(() => {
+    const cameraVideo = cameraVideoRef.current;
+    if (!cameraVideo) return;
+
+    if (!cameraVideoPath || hideCamera) {
+      cameraVideo.pause();
+      return;
+    }
+
+    if (isPlaying) {
+      cameraVideo.play().catch(() => {});
+    } else {
+      cameraVideo.pause();
+    }
+  }, [isPlaying, hideCamera, cameraVideoPath]);
+
   return (
     <div className="relative aspect-video rounded-sm overflow-hidden" style={{ width: '100%' }}>
       {/* Background layer - always render as DOM element with blur */}
@@ -795,6 +970,46 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
         }}
         onError={() => onError('Failed to load video')}
       />
+      {cameraVideoPath && (() => {
+        // Get camera shape from sessionStorage
+        let shape: 'circle' | 'squircle' | 'square' = 'squircle';
+        try {
+          const metadataStr = sessionStorage.getItem('cameraMetadata');
+          if (metadataStr) {
+            const metadata = JSON.parse(metadataStr);
+            if (metadata.shape && ['circle', 'squircle', 'square'].includes(metadata.shape)) {
+              shape = metadata.shape;
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to parse camera metadata for shape:', e);
+        }
+
+        const isCircle = shape === 'circle';
+        const borderRadius = shape === 'circle' ? '50%' : shape === 'squircle' ? '3rem' : '1rem';
+        const size = isCircle ? 'min(20%, 300px)' : '20%';
+        const maxSize = isCircle ? '300px' : '300px';
+
+        return (
+          <video
+            ref={cameraVideoRef}
+            src={cameraVideoPath}
+            className="absolute bottom-4 right-4 border border-black/40 shadow-lg overflow-hidden"
+            muted
+            playsInline
+            style={{
+              display: hideCamera ? 'none' : 'block',
+              width: size,
+              maxWidth: maxSize,
+              aspectRatio: isCircle ? '1 / 1' : 'auto',
+              height: isCircle ? size : 'auto',
+              maxHeight: isCircle ? maxSize : 'none',
+              borderRadius,
+              objectFit: 'cover',
+            }}
+          />
+        );
+      })()}
     </div>
   );
 });

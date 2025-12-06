@@ -23,7 +23,9 @@ export function createHudOverlayWindow(): BrowserWindow {
 
 
   const windowWidth = 500;
-  const windowHeight = 100;
+  // Make HUD window just tall enough for the bar itself so there is
+  // essentially no transparent padding above/below.
+  const windowHeight = 48;
 
   const x = Math.floor(workArea.x + (workArea.width - windowWidth) / 2);
   const y = Math.floor(workArea.y + workArea.height - windowHeight - 5);
@@ -33,8 +35,8 @@ export function createHudOverlayWindow(): BrowserWindow {
     height: windowHeight,
     minWidth: 500,
     maxWidth: 500,
-    minHeight: 100,
-    maxHeight: 100,
+    minHeight: windowHeight,
+    maxHeight: windowHeight,
     x: x,
     y: y,
     frame: false,
@@ -117,7 +119,7 @@ export function createEditorWindow(): BrowserWindow {
   return win
 }
 
-export function createSourceSelectorWindow(): BrowserWindow {
+export function createSourceSelectorWindow(mode?: 'screen' | 'camera'): BrowserWindow {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
   
   const win = new BrowserWindow({
@@ -139,60 +141,114 @@ export function createSourceSelectorWindow(): BrowserWindow {
     },
   })
 
+  // Construct URL with mode parameter
   if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL + '?windowType=source-selector')
+    const baseUrl = VITE_DEV_SERVER_URL.endsWith('/') 
+      ? VITE_DEV_SERVER_URL.slice(0, -1) 
+      : VITE_DEV_SERVER_URL;
+    const url = mode 
+      ? `${baseUrl}?windowType=source-selector&mode=${mode}`
+      : `${baseUrl}?windowType=source-selector`;
+    console.log('🔵 windows.ts: Loading URL:', url);
+    win.loadURL(url);
   } else {
-    win.loadFile(path.join(RENDERER_DIST, 'index.html'), { 
-      query: { windowType: 'source-selector' } 
-    })
+    const query: { windowType: string; mode?: string } = { windowType: 'source-selector' }
+    if (mode) {
+      query.mode = mode;
+    }
+    console.log('🔵 windows.ts: Loading file with query:', query);
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'), { query })
   }
 
   return win
 }
 
 export function createCameraPreviewWindow(): BrowserWindow {
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { workArea } = primaryDisplay;
+  console.log('🔵 windows.ts: createCameraPreviewWindow called');
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize
   
-  const windowWidth = 260;
-  const windowHeight = 260;
-  const x = Math.floor(workArea.x + workArea.width - windowWidth - 20);
-  const y = Math.floor(workArea.y + 20);
-
+  // Create a compact floating window, positioned top-right.
+  // Size is kept close to the preview so there isn't much outer padding.
+  const winWidth = 260;
+  const winHeight = 260;
+  const x = Math.round(width - winWidth - 20);
+  const y = 20;
+  
+  console.log('🔵 windows.ts: Creating camera preview window at', x, y, 'size', winWidth, 'x', winHeight);
+  
   const win = new BrowserWindow({
-    width: windowWidth,
-    height: windowHeight,
+    width: winWidth,
+    height: winHeight,
     minWidth: 220,
     minHeight: 220,
-    maxWidth: 400,
-    maxHeight: 400,
+    maxWidth: 640,
+    maxHeight: 640,
     x: x,
     y: y,
     frame: false,
-    transparent: true,
-    resizable: true,
+    resizable: false, // Don't allow resizing - size is controlled by UI
     alwaysOnTop: true,
+    transparent: true,
+    backgroundColor: '#00000000',
     skipTaskbar: true,
-    hasShadow: false,
+    show: true, // Show immediately - we'll ensure it stays visible
+    movable: true, // Allow window to be moved
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false,
     },
-  });
+  })
+  
+  // Ensure window is visible and on top
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   win.webContents.on('did-finish-load', () => {
-    win?.webContents.send('main-process-message', (new Date).toLocaleString());
-  });
+    console.log('🔵 windows.ts: Camera preview window loaded, showing...');
+    win?.webContents.send('main-process-message', (new Date).toLocaleString())
+    // Show and focus the window
+    win.show();
+    win.focus();
+    win.setAlwaysOnTop(true, 'screen-saver'); // Ensure it stays on top
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    console.log('🔵 windows.ts: Camera preview window shown and focused. Is visible?', win.isVisible());
+  })
+  
+  // Also show when DOM is ready
+  win.webContents.once('dom-ready', () => {
+    console.log('🔵 windows.ts: Camera preview DOM ready, forcing show...');
+    win.show();
+    win.focus();
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    console.log('🔵 windows.ts: Camera preview window forced to show. Is visible?', win.isVisible());
+  })
+  
+  // Show immediately after creation
+  win.once('ready-to-show', () => {
+    console.log('🔵 windows.ts: Camera preview ready-to-show event');
+    win.show();
+    win.focus();
+  })
+
+  win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('🔵 windows.ts: Camera preview window failed to load:', errorCode, errorDescription);
+  })
 
   if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL + '?windowType=camera-preview');
+    const baseUrl = VITE_DEV_SERVER_URL.endsWith('/') 
+      ? VITE_DEV_SERVER_URL.slice(0, -1) 
+      : VITE_DEV_SERVER_URL;
+    const url = baseUrl + '?windowType=camera-preview';
+    console.log('🔵 windows.ts: Loading camera preview URL:', url);
+    win.loadURL(url);
   } else {
-    win.loadFile(path.join(RENDERER_DIST, 'index.html'), { 
-      query: { windowType: 'camera-preview' } 
-    });
+    const query = { windowType: 'camera-preview' };
+    console.log('🔵 windows.ts: Loading camera preview file with query:', query);
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'), { query });
   }
 
-  return win;
+  console.log('🔵 windows.ts: Camera preview window created with ID:', win.id);
+  return win
 }

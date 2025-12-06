@@ -17,14 +17,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   switchToEditor: () => {
     return ipcRenderer.invoke('switch-to-editor')
   },
-  openSourceSelector: () => {
-    return ipcRenderer.invoke('open-source-selector')
+  openSourceSelector: (mode?: 'screen' | 'camera') => {
+    return ipcRenderer.invoke('open-source-selector', mode)
   },
   selectSource: (source: any) => {
     return ipcRenderer.invoke('select-source', source)
   },
+  selectSources: (sources: any[]) => {
+    return ipcRenderer.invoke('select-sources', sources)
+  },
   getSelectedSource: () => {
     return ipcRenderer.invoke('get-selected-source')
+  },
+  getSelectedSources: () => {
+    return ipcRenderer.invoke('get-selected-sources')
   },
 
   storeRecordedVideo: (videoData: ArrayBuffer, fileName: string) => {
@@ -33,6 +39,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getRecordedVideoPath: () => {
     return ipcRenderer.invoke('get-recorded-video-path')
+  },
+  storeRecordedCameraVideo: (videoData: ArrayBuffer, fileName: string) => {
+    return ipcRenderer.invoke('store-recorded-camera-video', videoData, fileName)
   },
   setRecordingState: (recording: boolean) => {
     return ipcRenderer.invoke('set-recording-state', recording)
@@ -51,13 +60,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openVideoFilePicker: () => {
     return ipcRenderer.invoke('open-video-file-picker')
   },
-  setCurrentVideoPath: (path: string) => {
-    return ipcRenderer.invoke('set-current-video-path', path)
+  setCurrentVideoPath: (path: string, cameraPath?: string | null) => {
+    return ipcRenderer.invoke('set-current-video-path', path, cameraPath)
   },
   getCurrentVideoPath: () => {
     return ipcRenderer.invoke('get-current-video-path')
   },
+  getCurrentCameraPath: () => {
+    return ipcRenderer.invoke('get-current-camera-path')
+  },
   clearCurrentVideoPath: () => {
     return ipcRenderer.invoke('clear-current-video-path')
+  },
+  openCameraPreview: () => {
+    return ipcRenderer.invoke('open-camera-preview')
+  },
+  closeCameraPreview: () => {
+    return ipcRenderer.invoke('close-camera-preview')
+  },
+  resizeWindow: (width: number, height: number) => {
+    return ipcRenderer.invoke('resize-camera-preview', width, height)
+  },
+  stopCameraTrack: () => {
+    return ipcRenderer.invoke('stop-camera-track')
+  },
+  stopMicTrack: () => {
+    return ipcRenderer.invoke('stop-mic-track')
   },
 })

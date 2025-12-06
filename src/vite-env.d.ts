@@ -10,13 +10,19 @@ interface ProcessedDesktopSource {
 }
 
 interface Window {
-  electronAPI: {
+  electronAPI?: {
     getSources: (opts: Electron.SourcesOptions) => Promise<ProcessedDesktopSource[]>
     switchToEditor: () => Promise<void>
-    openSourceSelector: () => Promise<void>
+    openSourceSelector: (mode?: 'screen' | 'camera') => Promise<void>
     selectSource: (source: any) => Promise<any>
     getSelectedSource: () => Promise<any>
     storeRecordedVideo: (videoData: ArrayBuffer, fileName: string) => Promise<{
+      success: boolean
+      path?: string
+      message: string
+      error?: string
+    }>
+    storeRecordedCameraVideo: (videoData: ArrayBuffer, fileName: string) => Promise<{
       success: boolean
       path?: string
       message: string
@@ -39,8 +45,18 @@ interface Window {
       cancelled?: boolean
     }>
     openVideoFilePicker: () => Promise<{ success: boolean; path?: string; cancelled?: boolean }>
-    setCurrentVideoPath: (path: string) => Promise<{ success: boolean }>
+    setCurrentVideoPath: (path: string, cameraPath?: string | null) => Promise<{ success: boolean }>
     getCurrentVideoPath: () => Promise<{ success: boolean; path?: string }>
+    getCurrentCameraPath: () => Promise<{ success: boolean; path?: string }>
     clearCurrentVideoPath: () => Promise<{ success: boolean }>
+    openCameraPreview: () => Promise<{ success: boolean; error?: string }>
+    closeCameraPreview: () => Promise<{ success: boolean }>
+    resizeWindow?: (width: number, height: number) => Promise<{ success: boolean }>
+    selectSources?: (sources: any[]) => Promise<any[]>
+    getSelectedSources?: () => Promise<any[]>
+    stopCameraTrack?: () => Promise<{ success: boolean; error?: string }>
+    stopMicTrack?: () => Promise<{ success: boolean; error?: string }>
+    on?: (channel: string, callback: () => void) => void
+    off?: (channel: string, callback: () => void) => void
   }
 }

@@ -30,6 +30,7 @@ const WALLPAPER_PATHS = Array.from({ length: WALLPAPER_COUNT }, (_, i) => `/wall
 
 export default function VideoEditor() {
   const [videoPath, setVideoPath] = useState<string | null>(null);
+  const [cameraVideoPath, setCameraVideoPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -42,6 +43,8 @@ export default function VideoEditor() {
   const [borderRadius, setBorderRadius] = useState(0);
   const [padding, setPadding] = useState(50);
   const [cropRegion, setCropRegion] = useState<CropRegion>(DEFAULT_CROP_REGION);
+  const [hideCamera, setHideCamera] = useState(false);
+  const [cameraShape, setCameraShape] = useState<'circle' | 'squircle' | 'square'>('squircle');
   const [zoomRegions, setZoomRegions] = useState<ZoomRegion[]>([]);
   const [selectedZoomId, setSelectedZoomId] = useState<string | null>(null);
   const [trimRegions, setTrimRegions] = useState<TrimRegion[]>([]);
@@ -73,23 +76,52 @@ export default function VideoEditor() {
   };
 
   useEffect(() => {
+    // Load camera shape from sessionStorage
+    try {
+      const metadataStr = sessionStorage.getItem('cameraMetadata');
+      if (metadataStr) {
+        const metadata = JSON.parse(metadataStr);
+        if (metadata.shape && ['circle', 'squircle', 'square'].includes(metadata.shape)) {
+          setCameraShape(metadata.shape);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load camera shape from sessionStorage:', e);
+    }
+  }, []);
+
+  useEffect(() => {
     async function loadVideo() {
       try {
-        const result = await apiBridge.getCurrentVideoPath();
+        const [mainResult, cameraResult] = await Promise.all([
+          apiBridge.getCurrentVideoPath(),
+          apiBridge.getCurrentCameraPath(),
+        ]);
         
-        if (result.success) {
-          if (result.path) {
-            const videoUrl = toFileUrl(result.path);
+        if (mainResult.success) {
+          if (mainResult.path) {
+            const videoUrl = toFileUrl(mainResult.path);
             setVideoPath(videoUrl);
-          } else if (result.file) {
+          } else if (mainResult.file) {
             // Web: create object URL from file
-            const videoUrl = URL.createObjectURL(result.file);
+            const videoUrl = URL.createObjectURL(mainResult.file);
             setVideoPath(videoUrl);
           } else {
             setError('No video to load. Please record or select a video.');
           }
         } else {
           setError('No video to load. Please record or select a video.');
+        }
+
+        if (cameraResult.success) {
+          if (cameraResult.path) {
+            setCameraVideoPath(toFileUrl(cameraResult.path));
+          } else if (cameraResult.file) {
+            const cameraUrl = URL.createObjectURL(cameraResult.file);
+            setCameraVideoPath(cameraUrl);
+          }
+        } else {
+          setCameraVideoPath(null);
         }
       } catch (err) {
         setError('Error loading video: ' + String(err));
@@ -102,8 +134,7 @@ export default function VideoEditor() {
 
   function togglePlayPause() {
     const playback = videoPlaybackRef.current;
-    const video = playback?.video;
-    if (!playback || !video) return;
+  if (!playback || !playback.video) return;
 
     if (isPlaying) {
       playback.pause();
@@ -113,9 +144,9 @@ export default function VideoEditor() {
   }
 
   function handleSeek(time: number) {
-    const video = videoPlaybackRef.current?.video;
-    if (!video) return;
-    video.currentTime = time;
+    const playback = videoPlaybackRef.current;
+    if (!playback) return;
+    playback.seek(time);
   }
 
   const handleSelectZoom = useCallback((id: string | null) => {
@@ -301,7 +332,9 @@ export default function VideoEditor() {
       }
 
       const exporter = new VideoExporter({
+        hideCamera: hideCamera,
         videoUrl: videoPath,
+        cameraVideoUrl: cameraVideoPath || undefined,
         width: exportWidth,
         height: exportHeight,
         frameRate: 60,
@@ -408,6 +441,7 @@ export default function VideoEditor() {
                     <VideoPlayback
                       ref={videoPlaybackRef}
                       videoPath={videoPath || ''}
+                      cameraVideoPath={cameraVideoPath}
                       onDurationChange={setDuration}
                       onTimeUpdate={setCurrentTime}
                       onPlayStateChange={setIsPlaying}
@@ -426,6 +460,7 @@ export default function VideoEditor() {
                       padding={padding}
                       cropRegion={cropRegion}
                       trimRegions={trimRegions}
+                      hideCamera={hideCamera}
                     />
                   </div>
                 </div>
@@ -491,8 +526,24 @@ export default function VideoEditor() {
           onBorderRadiusChange={setBorderRadius}
           padding={padding}
           onPaddingChange={setPadding}
-          cropRegion={cropRegion}
-          onCropChange={setCropRegion}
+                      cropRegion={cropRegion}
+                      onCropChange={(region) => {
+                        setCropRegion(region);
+                      }}
+                      hideCamera={hideCamera}
+          onHideCameraChange={setHideCamera}
+          cameraShape={cameraShape}
+          onCameraShapeChange={(shape) => {
+            setCameraShape(shape);
+            // Trigger re-render of camera overlay
+            if (videoPlaybackRef.current?.video) {
+              const video = videoPlaybackRef.current.video;
+              video.style.display = 'none';
+              setTimeout(() => {
+                video.style.display = '';
+              }, 0);
+            }
+          }}
           videoElement={videoPlaybackRef.current?.video || null}
           onExport={handleExport}
         />

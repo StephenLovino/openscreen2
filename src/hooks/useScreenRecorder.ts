@@ -15,8 +15,11 @@ let globalAudioTracks: MediaStreamTrack[] = [];
 export function useScreenRecorder(): UseScreenRecorderReturn {
   const [recording, setRecording] = useState(false);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const cameraRecorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
+  const cameraRecordingStream = useRef<MediaStream | null>(null);
   const chunks = useRef<Blob[]>([]);
+  const cameraChunks = useRef<Blob[]>([]);
   const startTime = useRef<number>(0);
   const cameraStreamRef = useRef<MediaStream | null>(null); // Track camera stream separately
   const audioTracksRef = useRef<MediaStreamTrack[]>([]); // Track audio tracks separately for stopping
@@ -27,17 +30,22 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         stream.current.getTracks().forEach(track => track.stop());
       }
       mediaRecorder.current.stop();
-      setRecording(false);
-
-      await apiBridge.setRecordingState(false);
-      
-      // Stop camera stream and close preview when recording stops
-      if (cameraStreamRef.current) {
-        cameraStreamRef.current.getTracks().forEach(track => track.stop());
-        cameraStreamRef.current = null;
-      }
-      await apiBridge.closeCameraPreview();
     }
+    if (cameraRecorder.current?.state === "recording") {
+      if (cameraRecordingStream.current) {
+        cameraRecordingStream.current.getTracks().forEach(track => track.stop());
+      }
+      cameraRecorder.current.stop();
+    }
+    setRecording(false);
+    await apiBridge.setRecordingState(false);
+    
+    // Stop camera stream and close preview when recording stops
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach(track => track.stop());
+      cameraStreamRef.current = null;
+    }
+    await apiBridge.closeCameraPreview();
   });
 
   useEffect(() => {
@@ -56,9 +64,16 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       if (mediaRecorder.current?.state === "recording") {
         mediaRecorder.current.stop();
       }
+      if (cameraRecorder.current?.state === "recording") {
+        cameraRecorder.current.stop();
+      }
       if (stream.current) {
         stream.current.getTracks().forEach(track => track.stop());
         stream.current = null;
+      }
+      if (cameraRecordingStream.current) {
+        cameraRecordingStream.current.getTracks().forEach(track => track.stop());
+        cameraRecordingStream.current = null;
       }
     };
   }, []);
@@ -116,8 +131,21 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       console.log('🔵 useScreenRecorder: cameraSource found?', !!cameraSource, cameraSource);
       console.log('🔵 useScreenRecorder: screenSource found?', !!screenSource, screenSource);
 
-      // Open camera preview if recording camera - do this FIRST before getting media streams
-      if (cameraSource) {
+      // If a camera preview window is already open while also capturing the screen,
+      // close it to avoid the camera UI being baked into the screen recording.
+      if (cameraSource && screenSource) {
+        try {
+          console.log('🔵 useScreenRecorder: Closing camera preview before screen+camera recording');
+          await apiBridge.closeCameraPreview();
+        } catch (error) {
+          console.warn('🔵 useScreenRecorder: Failed to close camera preview before recording:', error);
+        }
+      }
+
+      // Open camera preview only when recording camera without a separate screen source.
+      // When recording both screen and camera, showing the preview window would cause
+      // the camera UI to be baked into the screen recording itself.
+      if (cameraSource && !screenSource) {
         console.log('🔵 useScreenRecorder: Camera source detected! Opening camera preview...');
         console.log('🔵 useScreenRecorder: Camera source details:', {
           id: cameraSource.id,
@@ -234,91 +262,19 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         }
       }
       
-      // If both screen and camera are selected, composite them using Canvas
+      // Choose main recording stream (screen preferred), and attach audio tracks to it.
       if (screenStream && cameraStream) {
-        // Create canvas to composite screen + camera
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          throw new Error('Failed to get canvas context');
-        }
-        
-        // Get screen dimensions
-        const screenVideo = document.createElement('video');
-        screenVideo.srcObject = screenStream;
-        screenVideo.autoplay = true;
-        screenVideo.playsInline = true;
-        screenVideo.muted = true;
-        
-        await new Promise<void>((resolve) => {
-          screenVideo.onloadedmetadata = () => {
-            canvas.width = screenVideo.videoWidth;
-            canvas.height = screenVideo.videoHeight;
-            resolve();
-          };
-        });
-        
-        // Get camera dimensions and calculate overlay size/position
-        const cameraVideo = document.createElement('video');
-        cameraVideo.srcObject = cameraStream;
-        cameraVideo.autoplay = true;
-        cameraVideo.playsInline = true;
-        cameraVideo.muted = true;
-        
-        await new Promise<void>((resolve) => {
-          cameraVideo.onloadedmetadata = () => {
-            resolve();
-          };
-        });
-        
-        // Camera overlay size (typically 15-20% of screen width, positioned bottom-right)
-        const cameraOverlayWidth = Math.min(canvas.width * 0.2, 300);
-        const cameraOverlayHeight = (cameraVideo.videoHeight / cameraVideo.videoWidth) * cameraOverlayWidth;
-        const cameraX = canvas.width - cameraOverlayWidth - 20;
-        const cameraY = canvas.height - cameraOverlayHeight - 20;
-        
-        // Store camera metadata for later use
-        const cameraMetadata = {
-          x: cameraX / canvas.width, // Normalized position
-          y: cameraY / canvas.height,
-          width: cameraOverlayWidth / canvas.width,
-          height: cameraOverlayHeight / canvas.height,
-          absoluteX: cameraX,
-          absoluteY: cameraY,
-          absoluteWidth: cameraOverlayWidth,
-          absoluteHeight: cameraOverlayHeight
-        };
-        
-        // Store metadata in sessionStorage for later retrieval
-        sessionStorage.setItem('cameraMetadata', JSON.stringify(cameraMetadata));
-        
-        // Composite frames
-        const drawFrame = () => {
-          if (screenVideo.readyState >= 2 && cameraVideo.readyState >= 2) {
-            // Draw screen as background
-            ctx.drawImage(screenVideo, 0, 0, canvas.width, canvas.height);
-            // Draw camera as overlay in bottom-right
-            ctx.drawImage(cameraVideo, cameraX, cameraY, cameraOverlayWidth, cameraOverlayHeight);
-          }
-          requestAnimationFrame(drawFrame);
-        };
-        drawFrame();
-        
-        // Get canvas stream
-        compositedStream = canvas.captureStream(60);
-        
-        // Add audio tracks from camera stream
+        mediaStream = screenStream;
+        // Attach all audio tracks (mic + system) from camera stream to main screen stream
         cameraStream.getAudioTracks().forEach(track => {
-          compositedStream!.addTrack(track);
+          mediaStream.addTrack(track);
         });
-        
-        mediaStream = compositedStream;
       } else if (cameraSource && !screenSource) {
         // Camera only - use camera stream directly
-        mediaStream = cameraStream;
+        mediaStream = cameraStream!;
       } else if (screenSource && !cameraSource) {
         // Screen only - use screen stream directly
-        mediaStream = screenStream;
+        mediaStream = screenStream!;
       } else {
         // Fallback: use first source (backward compatibility)
         const selectedSource = sources[0];
@@ -392,6 +348,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         bitrate = 80_000_000;
       }
       chunks.current = [];
+      cameraChunks.current = [];
       // Check if stream has audio tracks
       const hasAudio = stream.current.getAudioTracks().length > 0;
       
@@ -423,21 +380,33 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       };
       recorder.onstop = async () => {
         stream.current = null;
-        if (chunks.current.length === 0) return;
         const duration = Date.now() - startTime.current;
-        const buggyBlob = new Blob(chunks.current, { type: mimeType });
-        // Clear chunks early to free memory immediately after blob creation
-        chunks.current = [];
         const timestamp = Date.now();
         const videoFileName = `recording-${timestamp}.webm`;
+        const cameraFileName = `recording-${timestamp}-camera.webm`;
 
         try {
-          const videoBlob = await fixWebmDuration(buggyBlob, duration);
-          const arrayBuffer = await videoBlob.arrayBuffer();
-          const videoResult = await apiBridge.storeRecordedVideo(arrayBuffer, videoFileName);
-          if (!videoResult.success) {
-            console.error('Failed to store video:', videoResult.message);
-            return;
+          if (chunks.current.length > 0) {
+            const buggyBlob = new Blob(chunks.current, { type: mimeType });
+            chunks.current = [];
+            const videoBlob = await fixWebmDuration(buggyBlob, duration);
+            const arrayBuffer = await videoBlob.arrayBuffer();
+            const videoResult = await apiBridge.storeRecordedVideo(arrayBuffer, videoFileName);
+            if (!videoResult.success) {
+              console.error('Failed to store video:', videoResult.message);
+              return;
+            }
+          }
+
+          // Store camera-only recording if available
+          if (cameraChunks.current.length > 0) {
+            const cameraBlob = new Blob(cameraChunks.current, { type: mimeType });
+            cameraChunks.current = [];
+            const cameraArrayBuffer = await cameraBlob.arrayBuffer();
+            const cameraResult = await apiBridge.storeRecordedCameraVideo(cameraArrayBuffer, cameraFileName);
+            if (!cameraResult.success) {
+              console.error('Failed to store camera video:', cameraResult.message);
+            }
           }
 
           await apiBridge.switchToEditor();
@@ -446,6 +415,23 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         }
       };
       recorder.onerror = () => setRecording(false);
+      // Create separate recorder for camera video-only, if we have camera stream
+      if (cameraStream) {
+        const cameraVideoTrack = cameraStream.getVideoTracks()[0];
+        if (cameraVideoTrack) {
+          cameraRecordingStream.current = new MediaStream([cameraVideoTrack]);
+          const cameraRec = new MediaRecorder(cameraRecordingStream.current, { mimeType });
+          cameraRecorder.current = cameraRec;
+          cameraRec.ondataavailable = e => {
+            if (e.data && e.data.size > 0) cameraChunks.current.push(e.data);
+          };
+          cameraRec.onerror = () => {
+            console.warn('Camera recorder error');
+          };
+          cameraRec.start(5000);
+        }
+      }
+
       // Use larger timeslice to reduce recording overhead and improve smoothness
       recorder.start(5000);
       startTime.current = Date.now();

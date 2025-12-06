@@ -2,8 +2,8 @@ import { ipcMain, screen, BrowserWindow, desktopCapturer, shell, app, dialog, na
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs/promises";
-const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
-const APP_ROOT = path.join(__dirname$1, "..");
+const __dirname$2 = path.dirname(fileURLToPath(import.meta.url));
+const APP_ROOT = path.join(__dirname$2, "..");
 const VITE_DEV_SERVER_URL$1 = process.env["VITE_DEV_SERVER_URL"];
 const RENDERER_DIST$1 = path.join(APP_ROOT, "dist");
 let hudOverlayWindow = null;
@@ -16,7 +16,7 @@ function createHudOverlayWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { workArea } = primaryDisplay;
   const windowWidth = 500;
-  const windowHeight = 100;
+  const windowHeight = 48;
   const x = Math.floor(workArea.x + (workArea.width - windowWidth) / 2);
   const y = Math.floor(workArea.y + workArea.height - windowHeight - 5);
   const win = new BrowserWindow({
@@ -24,8 +24,8 @@ function createHudOverlayWindow() {
     height: windowHeight,
     minWidth: 500,
     maxWidth: 500,
-    minHeight: 100,
-    maxHeight: 100,
+    minHeight: windowHeight,
+    maxHeight: windowHeight,
     x,
     y,
     frame: false,
@@ -35,7 +35,7 @@ function createHudOverlayWindow() {
     skipTaskbar: true,
     hasShadow: false,
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs"),
+      preload: path.join(__dirname$2, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false
@@ -74,7 +74,7 @@ function createEditorWindow() {
     title: "OpenScreen",
     backgroundColor: "#000000",
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs"),
+      preload: path.join(__dirname$2, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false,
@@ -94,7 +94,7 @@ function createEditorWindow() {
   }
   return win;
 }
-function createSourceSelectorWindow() {
+function createSourceSelectorWindow(mode) {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const win = new BrowserWindow({
     width: 620,
@@ -109,22 +109,105 @@ function createSourceSelectorWindow() {
     transparent: true,
     backgroundColor: "#00000000",
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs"),
+      preload: path.join(__dirname$2, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true
     }
   });
   if (VITE_DEV_SERVER_URL$1) {
-    win.loadURL(VITE_DEV_SERVER_URL$1 + "?windowType=source-selector");
+    const baseUrl = VITE_DEV_SERVER_URL$1.endsWith("/") ? VITE_DEV_SERVER_URL$1.slice(0, -1) : VITE_DEV_SERVER_URL$1;
+    const url = mode ? `${baseUrl}?windowType=source-selector&mode=${mode}` : `${baseUrl}?windowType=source-selector`;
+    console.log("🔵 windows.ts: Loading URL:", url);
+    win.loadURL(url);
   } else {
-    win.loadFile(path.join(RENDERER_DIST$1, "index.html"), {
-      query: { windowType: "source-selector" }
-    });
+    const query = { windowType: "source-selector" };
+    if (mode) {
+      query.mode = mode;
+    }
+    console.log("🔵 windows.ts: Loading file with query:", query);
+    win.loadFile(path.join(RENDERER_DIST$1, "index.html"), { query });
   }
   return win;
 }
+function createCameraPreviewWindow() {
+  console.log("🔵 windows.ts: createCameraPreviewWindow called");
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const winWidth = 260;
+  const winHeight = 260;
+  const x = Math.round(width - winWidth - 20);
+  const y = 20;
+  console.log("🔵 windows.ts: Creating camera preview window at", x, y, "size", winWidth, "x", winHeight);
+  const win = new BrowserWindow({
+    width: winWidth,
+    height: winHeight,
+    minWidth: 220,
+    minHeight: 220,
+    maxWidth: 640,
+    maxHeight: 640,
+    x,
+    y,
+    frame: false,
+    resizable: false,
+    // Don't allow resizing - size is controlled by UI
+    alwaysOnTop: true,
+    transparent: true,
+    backgroundColor: "#00000000",
+    skipTaskbar: true,
+    show: true,
+    // Show immediately - we'll ensure it stays visible
+    movable: true,
+    // Allow window to be moved
+    webPreferences: {
+      preload: path.join(__dirname$2, "preload.mjs"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      backgroundThrottling: false
+    }
+  });
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.webContents.on("did-finish-load", () => {
+    console.log("🔵 windows.ts: Camera preview window loaded, showing...");
+    win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+    win.show();
+    win.focus();
+    win.setAlwaysOnTop(true, "screen-saver");
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    console.log("🔵 windows.ts: Camera preview window shown and focused. Is visible?", win.isVisible());
+  });
+  win.webContents.once("dom-ready", () => {
+    console.log("🔵 windows.ts: Camera preview DOM ready, forcing show...");
+    win.show();
+    win.focus();
+    win.setAlwaysOnTop(true, "screen-saver");
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    console.log("🔵 windows.ts: Camera preview window forced to show. Is visible?", win.isVisible());
+  });
+  win.once("ready-to-show", () => {
+    console.log("🔵 windows.ts: Camera preview ready-to-show event");
+    win.show();
+    win.focus();
+  });
+  win.webContents.on("did-fail-load", (event, errorCode, errorDescription) => {
+    console.error("🔵 windows.ts: Camera preview window failed to load:", errorCode, errorDescription);
+  });
+  if (VITE_DEV_SERVER_URL$1) {
+    const baseUrl = VITE_DEV_SERVER_URL$1.endsWith("/") ? VITE_DEV_SERVER_URL$1.slice(0, -1) : VITE_DEV_SERVER_URL$1;
+    const url = baseUrl + "?windowType=camera-preview";
+    console.log("🔵 windows.ts: Loading camera preview URL:", url);
+    win.loadURL(url);
+  } else {
+    const query = { windowType: "camera-preview" };
+    console.log("🔵 windows.ts: Loading camera preview file with query:", query);
+    win.loadFile(path.join(RENDERER_DIST$1, "index.html"), { query });
+  }
+  console.log("🔵 windows.ts: Camera preview window created with ID:", win.id);
+  return win;
+}
+const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 let selectedSource = null;
-function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, getMainWindow, getSourceSelectorWindow, onRecordingStateChange) {
+let selectedSources = [];
+let lastGetSourcesLogTime = 0;
+function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, getMainWindow, getSourceSelectorWindow, onRecordingStateChange, getCameraPreviewWindow, createCameraPreviewWindow2, closeCameraPreviewWindow) {
   ipcMain.handle("get-sources", async (_, opts) => {
     const sources = await desktopCapturer.getSources(opts);
     return sources.map((source) => ({
@@ -143,16 +226,66 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
     }
     return selectedSource;
   });
+  ipcMain.handle("select-sources", (_, sources) => {
+    console.log("🔵 IPC: select-sources called with sources:", JSON.stringify(sources, null, 2));
+    const merged = {};
+    for (const s of selectedSources) {
+      if (s == null ? void 0 : s.id) merged[s.id] = s;
+    }
+    for (const s of sources) {
+      if (s == null ? void 0 : s.id) merged[s.id] = s;
+    }
+    selectedSources = Object.values(merged);
+    selectedSource = selectedSources.length > 0 ? selectedSources[0] : null;
+    console.log("🔵 IPC: Stored selectedSources:", selectedSources.length, "sources");
+    const hasCamera = selectedSources.some((s) => {
+      var _a;
+      return s.type === "camera" || ((_a = s.id) == null ? void 0 : _a.startsWith("camera:"));
+    });
+    console.log("🔵 IPC: Camera source found?", hasCamera);
+    return selectedSources;
+  });
   ipcMain.handle("get-selected-source", () => {
     return selectedSource;
   });
-  ipcMain.handle("open-source-selector", () => {
+  ipcMain.handle("get-selected-sources", () => {
+    const result = selectedSources.length > 0 ? selectedSources : selectedSource ? [selectedSource] : [];
+    if (result.length > 0 && Date.now() - lastGetSourcesLogTime > 5e3) {
+      const sourceSummary = result.map((s) => {
+        var _a;
+        return `${s.type || "unknown"}:${(_a = s.id) == null ? void 0 : _a.substring(0, 20)}...`;
+      }).join(", ");
+      console.log("🔵 IPC: get-selected-sources returning:", result.length, "sources:", sourceSummary);
+      lastGetSourcesLogTime = Date.now();
+    }
+    return result;
+  });
+  ipcMain.handle("open-source-selector", (_, mode) => {
+    console.log("🔵 IPC: open-source-selector called with mode:", mode);
     const sourceSelectorWin = getSourceSelectorWindow();
-    if (sourceSelectorWin) {
+    if (sourceSelectorWin && !sourceSelectorWin.isDestroyed()) {
+      const VITE_DEV_SERVER_URL2 = process.env["VITE_DEV_SERVER_URL"];
+      console.log("🔵 IPC: VITE_DEV_SERVER_URL:", VITE_DEV_SERVER_URL2);
+      if (VITE_DEV_SERVER_URL2) {
+        const baseUrl = VITE_DEV_SERVER_URL2.endsWith("/") ? VITE_DEV_SERVER_URL2.slice(0, -1) : VITE_DEV_SERVER_URL2;
+        const url = mode ? `${baseUrl}?windowType=source-selector&mode=${mode}` : `${baseUrl}?windowType=source-selector`;
+        console.log("🔵 IPC: Reloading window with URL:", url);
+        sourceSelectorWin.webContents.loadURL(url);
+      } else {
+        const APP_ROOT2 = path.join(__dirname$1, "..");
+        const RENDERER_DIST2 = path.join(APP_ROOT2, "dist");
+        const query = { windowType: "source-selector" };
+        if (mode) {
+          query.mode = mode;
+        }
+        console.log("🔵 IPC: Loading file with query:", query);
+        sourceSelectorWin.webContents.loadFile(path.join(RENDERER_DIST2, "index.html"), { query });
+      }
       sourceSelectorWin.focus();
       return;
     }
-    createSourceSelectorWindow2();
+    console.log("🔵 IPC: Creating new source selector window with mode:", mode);
+    createSourceSelectorWindow2(mode);
   });
   ipcMain.handle("switch-to-editor", () => {
     const mainWin = getMainWindow();
@@ -200,6 +333,68 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
     if (onRecordingStateChange) {
       onRecordingStateChange(recording, source.name);
     }
+  });
+  ipcMain.handle("open-camera-preview", () => {
+    console.log("🔵 IPC: open-camera-preview called");
+    console.log("🔵 IPC: createCameraPreviewWindow function exists?", !!createCameraPreviewWindow2);
+    if (createCameraPreviewWindow2) {
+      try {
+        console.log("🔵 IPC: Calling createCameraPreviewWindow()...");
+        const win = createCameraPreviewWindow2();
+        console.log("🔵 IPC: Camera preview window created with ID:", win == null ? void 0 : win.id);
+        console.log("🔵 IPC: Window is destroyed?", win == null ? void 0 : win.isDestroyed());
+        console.log("🔵 IPC: Window is visible?", win == null ? void 0 : win.isVisible());
+        setTimeout(() => {
+          if (win && !win.isDestroyed()) {
+            console.log("🔵 IPC: Forcing window to show...");
+            win.show();
+            win.focus();
+            win.setAlwaysOnTop(true, "screen-saver");
+            win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+            console.log("🔵 IPC: Camera preview window forced to show. Is visible now?", win.isVisible());
+          } else {
+            console.error("🔵 IPC: Window is destroyed or null, cannot show");
+          }
+        }, 500);
+        return { success: true };
+      } catch (error) {
+        console.error("🔵 IPC: Error creating camera preview window:", error);
+        return { success: false, error: String(error) };
+      }
+    }
+    console.error("🔵 IPC: createCameraPreviewWindow function not available");
+    return { success: false, error: "Camera preview not available" };
+  });
+  ipcMain.handle("close-camera-preview", () => {
+    if (closeCameraPreviewWindow) {
+      closeCameraPreviewWindow();
+      return { success: true };
+    }
+    return { success: false };
+  });
+  ipcMain.handle("stop-camera-track", () => {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send("stop-camera-track-request");
+      return { success: true };
+    }
+    return { success: false, error: "Main window not available" };
+  });
+  ipcMain.handle("stop-mic-track", () => {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send("stop-mic-track-request");
+      return { success: true };
+    }
+    return { success: false, error: "Main window not available" };
+  });
+  ipcMain.handle("resize-camera-preview", (_, width, height) => {
+    const cameraPreviewWin = getCameraPreviewWindow == null ? void 0 : getCameraPreviewWindow();
+    if (cameraPreviewWin && !cameraPreviewWin.isDestroyed()) {
+      cameraPreviewWin.setSize(width, height, false);
+      return { success: true };
+    }
+    return { success: false };
   });
   ipcMain.handle("open-external-url", async (_, url) => {
     try {
@@ -281,15 +476,42 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
     }
   });
   let currentVideoPath = null;
-  ipcMain.handle("set-current-video-path", (_, path2) => {
+  let currentCameraVideoPath = null;
+  ipcMain.handle("store-recorded-camera-video", async (_, videoData, fileName) => {
+    try {
+      const videoPath = path.join(RECORDINGS_DIR, fileName);
+      await fs.writeFile(videoPath, Buffer.from(videoData));
+      currentCameraVideoPath = videoPath;
+      return {
+        success: true,
+        path: videoPath,
+        message: "Camera video stored successfully"
+      };
+    } catch (error) {
+      console.error("Failed to store camera video:", error);
+      return {
+        success: false,
+        message: "Failed to store camera video",
+        error: String(error)
+      };
+    }
+  });
+  ipcMain.handle("set-current-video-path", (_, path2, cameraPath) => {
     currentVideoPath = path2;
+    if (cameraPath !== void 0) {
+      currentCameraVideoPath = cameraPath;
+    }
     return { success: true };
   });
   ipcMain.handle("get-current-video-path", () => {
     return currentVideoPath ? { success: true, path: currentVideoPath } : { success: false };
   });
+  ipcMain.handle("get-current-camera-path", () => {
+    return currentCameraVideoPath ? { success: true, path: currentCameraVideoPath } : { success: false };
+  });
   ipcMain.handle("clear-current-video-path", () => {
     currentVideoPath = null;
+    currentCameraVideoPath = null;
     return { success: true };
   });
 }
@@ -311,6 +533,7 @@ const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
 let mainWindow = null;
 let sourceSelectorWindow = null;
+let cameraPreviewWindow = null;
 let tray = null;
 let selectedSourceName = "";
 function createWindow() {
@@ -348,11 +571,55 @@ function createEditorWindowWrapper() {
 }
 function createSourceSelectorWindowWrapper(mode) {
   console.log("🔵 main.ts: createSourceSelectorWindowWrapper called with mode:", mode);
-  sourceSelectorWindow = createSourceSelectorWindow();
+  sourceSelectorWindow = createSourceSelectorWindow(mode);
   sourceSelectorWindow.on("closed", () => {
     sourceSelectorWindow = null;
   });
   return sourceSelectorWindow;
+}
+function createCameraPreviewWindowWrapper() {
+  console.log("🔵 main.ts: createCameraPreviewWindowWrapper called");
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    console.log("🔵 main.ts: Reusing existing camera preview window");
+    cameraPreviewWindow.show();
+    cameraPreviewWindow.focus();
+    cameraPreviewWindow.setAlwaysOnTop(true, "screen-saver");
+    cameraPreviewWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    console.log("🔵 main.ts: Existing window shown. Is visible?", cameraPreviewWindow.isVisible());
+    return cameraPreviewWindow;
+  }
+  console.log("🔵 main.ts: Creating new camera preview window");
+  cameraPreviewWindow = createCameraPreviewWindow();
+  console.log("🔵 main.ts: Camera preview window created with ID:", cameraPreviewWindow.id);
+  cameraPreviewWindow.on("closed", () => {
+    console.log("🔵 main.ts: Camera preview window closed");
+    cameraPreviewWindow = null;
+  });
+  cameraPreviewWindow.once("ready-to-show", () => {
+    console.log("🔵 main.ts: Camera preview window ready-to-show");
+    if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+      cameraPreviewWindow.show();
+      cameraPreviewWindow.focus();
+      cameraPreviewWindow.setAlwaysOnTop(true, "screen-saver");
+      cameraPreviewWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      console.log("🔵 main.ts: Window shown from ready-to-show. Is visible?", cameraPreviewWindow.isVisible());
+    }
+  });
+  setTimeout(() => {
+    if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+      console.log("🔵 main.ts: Force showing window after 100ms");
+      cameraPreviewWindow.show();
+      cameraPreviewWindow.focus();
+      console.log("🔵 main.ts: Window forced to show. Is visible?", cameraPreviewWindow.isVisible());
+    }
+  }, 100);
+  return cameraPreviewWindow;
+}
+function closeCameraPreviewWindowWrapper() {
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    cameraPreviewWindow.close();
+    cameraPreviewWindow = null;
+  }
 }
 app.on("window-all-closed", () => {
 });
@@ -386,7 +653,10 @@ app.whenReady().then(async () => {
         }
         if (mainWindow) mainWindow.restore();
       }
-    }
+    },
+    () => cameraPreviewWindow,
+    createCameraPreviewWindowWrapper,
+    closeCameraPreviewWindowWrapper
   );
   createWindow();
 });
