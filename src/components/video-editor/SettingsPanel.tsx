@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import type { ZoomDepth, CropRegion } from "./types";
 import { CropControl } from "./CropControl";
 import { KeyboardShortcutsHelp } from "./KeyboardShortcutsHelp";
+import { apiBridge } from "@/lib/apiBridge";
 
 const WALLPAPER_COUNT = 18;
 const WALLPAPER_RELATIVE = Array.from({ length: WALLPAPER_COUNT }, (_, i) => `wallpapers/wallpaper${i + 1}.jpg`);
@@ -469,7 +470,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
           <button
             type="button"
             onClick={() => {
-              window.electronAPI?.openExternalUrl('https://github.com/siddharthvaddem/openscreen/issues/new');
+              apiBridge.openExternalUrl('https://github.com/siddharthvaddem/openscreen/issues/new');
             }}
             className="flex-1 flex items-center justify-center gap-2 text-xs py-2"
           >
@@ -479,7 +480,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
           <button
             type="button"
             onClick={() => {
-              window.electronAPI?.openExternalUrl('https://buymeacoffee.com/siddharthvaddem');
+              apiBridge.openExternalUrl('https://buymeacoffee.com/siddharthvaddem');
             }}
             className="flex-1 flex items-center justify-center gap-2 text-xs"
           >

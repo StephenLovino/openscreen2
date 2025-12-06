@@ -23,6 +23,7 @@ import {
   type CropRegion,
 } from "./types";
 import { VideoExporter, type ExportProgress } from "@/lib/exporter";
+import { apiBridge } from "@/lib/apiBridge";
 
 const WALLPAPER_COUNT = 18;
 const WALLPAPER_PATHS = Array.from({ length: WALLPAPER_COUNT }, (_, i) => `/wallpapers/wallpaper${i + 1}.jpg`);
@@ -74,11 +75,19 @@ export default function VideoEditor() {
   useEffect(() => {
     async function loadVideo() {
       try {
-        const result = await window.electronAPI.getCurrentVideoPath();
+        const result = await apiBridge.getCurrentVideoPath();
         
-        if (result.success && result.path) {
-          const videoUrl = toFileUrl(result.path);
-          setVideoPath(videoUrl);
+        if (result.success) {
+          if (result.path) {
+            const videoUrl = toFileUrl(result.path);
+            setVideoPath(videoUrl);
+          } else if (result.file) {
+            // Web: create object URL from file
+            const videoUrl = URL.createObjectURL(result.file);
+            setVideoPath(videoUrl);
+          } else {
+            setError('No video to load. Please record or select a video.');
+          }
         } else {
           setError('No video to load. Please record or select a video.');
         }
@@ -321,7 +330,7 @@ export default function VideoEditor() {
         const timestamp = Date.now();
         const fileName = `export-${timestamp}.mp4`;
         
-        const saveResult = await window.electronAPI.saveExportedVideo(arrayBuffer, fileName);
+        const saveResult = await apiBridge.saveExportedVideo(arrayBuffer, fileName);
         
         if (saveResult.cancelled) {
           toast.info('Export cancelled');

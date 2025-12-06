@@ -1,6 +1,6 @@
 
 .glassContainer {
-  background: linear-gradient(135deg, rgba(28,28,34,0.92) 0%, rgba(18,18,22,0.88) 100%);
+  background: linear-gradient(135deg, rgba(28,28,34,0.98) 0%, rgba(18,18,22,0.96) 100%);
   backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
   border-radius: 14px;

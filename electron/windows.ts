@@ -149,3 +149,50 @@ export function createSourceSelectorWindow(): BrowserWindow {
 
   return win
 }
+
+export function createCameraPreviewWindow(): BrowserWindow {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { workArea } = primaryDisplay;
+  
+  const windowWidth = 260;
+  const windowHeight = 260;
+  const x = Math.floor(workArea.x + workArea.width - windowWidth - 20);
+  const y = Math.floor(workArea.y + 20);
+
+  const win = new BrowserWindow({
+    width: windowWidth,
+    height: windowHeight,
+    minWidth: 220,
+    minHeight: 220,
+    maxWidth: 400,
+    maxHeight: 400,
+    x: x,
+    y: y,
+    frame: false,
+    transparent: true,
+    resizable: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.mjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      backgroundThrottling: false,
+    },
+  });
+
+  win.webContents.on('did-finish-load', () => {
+    win?.webContents.send('main-process-message', (new Date).toLocaleString());
+  });
+
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL + '?windowType=camera-preview');
+  } else {
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'), { 
+      query: { windowType: 'camera-preview' } 
+    });
+  }
+
+  return win;
+}

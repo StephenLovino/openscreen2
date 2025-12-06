@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:web": "vite --config vite.config.web.ts",
     "build": "tsc && vite build && electron-builder",
+    "build:web": "tsc && vite build --config vite.config.web.ts",
+    "preview:web": "vite preview --config vite.config.web.ts",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "build:mac": "tsc && vite build && electron-builder --mac",
@@ -53,6 +56,7 @@
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "node-addon-api": "^8.5.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.18",
     "terser": "^5.44.1",

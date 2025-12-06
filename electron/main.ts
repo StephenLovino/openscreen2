@@ -2,7 +2,7 @@ import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
-import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow } from './windows'
+import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, createCameraPreviewWindow } from './windows'
 import { registerIpcHandlers } from './ipc/handlers'
 
 
@@ -42,6 +42,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 // Window references
 let mainWindow: BrowserWindow | null = null
 let sourceSelectorWindow: BrowserWindow | null = null
+let cameraPreviewWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let selectedSourceName = ''
 
@@ -82,12 +83,61 @@ function createEditorWindowWrapper() {
   mainWindow = createEditorWindow()
 }
 
-function createSourceSelectorWindowWrapper() {
-  sourceSelectorWindow = createSourceSelectorWindow()
+function createSourceSelectorWindowWrapper(mode?: 'screen' | 'camera') {
+  console.log('🔵 main.ts: createSourceSelectorWindowWrapper called with mode:', mode);
+  sourceSelectorWindow = createSourceSelectorWindow(mode)
   sourceSelectorWindow.on('closed', () => {
     sourceSelectorWindow = null
   })
   return sourceSelectorWindow
+}
+
+function createCameraPreviewWindowWrapper() {
+  console.log('🔵 main.ts: createCameraPreviewWindowWrapper called');
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    console.log('🔵 main.ts: Reusing existing camera preview window');
+    cameraPreviewWindow.show();
+    cameraPreviewWindow.focus();
+    cameraPreviewWindow.setAlwaysOnTop(true, 'screen-saver');
+    cameraPreviewWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    console.log('🔵 main.ts: Existing window shown. Is visible?', cameraPreviewWindow.isVisible());
+    return cameraPreviewWindow;
+  }
+  console.log('🔵 main.ts: Creating new camera preview window');
+  cameraPreviewWindow = createCameraPreviewWindow();
+  console.log('🔵 main.ts: Camera preview window created with ID:', cameraPreviewWindow.id);
+  cameraPreviewWindow.on('closed', () => {
+    console.log('🔵 main.ts: Camera preview window closed');
+    cameraPreviewWindow = null;
+  });
+  // Ensure window is visible
+  cameraPreviewWindow.once('ready-to-show', () => {
+    console.log('🔵 main.ts: Camera preview window ready-to-show');
+    if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+      cameraPreviewWindow.show();
+      cameraPreviewWindow.focus();
+      cameraPreviewWindow.setAlwaysOnTop(true, 'screen-saver');
+      cameraPreviewWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      console.log('🔵 main.ts: Window shown from ready-to-show. Is visible?', cameraPreviewWindow.isVisible());
+    }
+  });
+  // Also try to show immediately
+  setTimeout(() => {
+    if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+      console.log('🔵 main.ts: Force showing window after 100ms');
+      cameraPreviewWindow.show();
+      cameraPreviewWindow.focus();
+      console.log('🔵 main.ts: Window forced to show. Is visible?', cameraPreviewWindow.isVisible());
+    }
+  }, 100);
+  return cameraPreviewWindow;
+}
+
+function closeCameraPreviewWindowWrapper() {
+  if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
+    cameraPreviewWindow.close();
+    cameraPreviewWindow = null;
+  }
 }
 
 // On macOS, applications and their menu bar stay active until the user quits
@@ -135,7 +185,10 @@ app.whenReady().then(async () => {
         }
         if (mainWindow) mainWindow.restore();
       }
-    }
+    },
+    () => cameraPreviewWindow,
+    createCameraPreviewWindowWrapper,
+    closeCameraPreviewWindowWrapper
   )
   createWindow()
 })

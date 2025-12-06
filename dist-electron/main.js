@@ -346,7 +346,8 @@ function createEditorWindowWrapper() {
   }
   mainWindow = createEditorWindow();
 }
-function createSourceSelectorWindowWrapper() {
+function createSourceSelectorWindowWrapper(mode) {
+  console.log("🔵 main.ts: createSourceSelectorWindowWrapper called with mode:", mode);
   sourceSelectorWindow = createSourceSelectorWindow();
   sourceSelectorWindow.on("closed", () => {
     sourceSelectorWindow = null;

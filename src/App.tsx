@@ -26,8 +26,28 @@ export default function App() {
       return <VideoEditor />;
       default:
       return (
-        <div className="w-full h-full bg-background text-foreground">
-          <h1>Openscreen</h1>
+        <div className="w-full h-full bg-background text-foreground flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <h1 className="text-2xl font-bold">OpenScreen</h1>
+            <p className="text-muted-foreground">Web Version</p>
+            <div className="space-y-2">
+              <a 
+                href="/?windowType=source-selector" 
+                className="block px-4 py-2 bg-[#34B27B] text-white rounded hover:bg-[#34B27B]/80"
+              >
+                Select Source & Record
+              </a>
+              <a 
+                href="/?windowType=editor" 
+                className="block px-4 py-2 bg-zinc-700 text-white rounded hover:bg-zinc-600"
+              >
+                Open Video Editor
+              </a>
+            </div>
+            <p className="text-xs text-muted-foreground mt-4">
+              Note: Camera recording is available. Desktop recording requires Electron.
+            </p>
+          </div>
         </div>
       );
   }

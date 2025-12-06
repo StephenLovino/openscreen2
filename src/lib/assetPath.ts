@@ -1,3 +1,5 @@
+import { apiBridge } from './apiBridge';
+
 export async function getAssetPath(relativePath: string): Promise<string> {
   try {
     if (typeof window !== 'undefined') {
@@ -6,12 +8,10 @@ export async function getAssetPath(relativePath: string): Promise<string> {
         return `/${relativePath.replace(/^\//, '')}`
       }
 
-      if ((window as any).electronAPI && typeof (window as any).electronAPI.getAssetBasePath === 'function') {
-        const base = await (window as any).electronAPI.getAssetBasePath()
-        if (base) {
-          const normalized = base.replace(/\\/g, '/')
-          return `file://${normalized}/${relativePath}`
-        }
+      const base = await apiBridge.getAssetBasePath();
+      if (base) {
+        const normalized = base.replace(/\\/g, '/')
+        return `file://${normalized}/${relativePath}`
       }
     }
   } catch (err) {

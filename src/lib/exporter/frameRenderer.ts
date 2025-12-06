@@ -20,6 +20,7 @@ interface FrameRenderConfig {
   cropRegion: CropRegion;
   videoWidth: number;
   videoHeight: number;
+  hideCamera?: boolean;
 }
 
 interface AnimationState {
@@ -472,6 +473,72 @@ export class FrameRenderer {
       ctx.drawImage(this.shadowCanvas, 0, 0, w, h);
     } else {
       ctx.drawImage(videoCanvas, 0, 0, w, h);
+    }
+    
+    // Apply camera mask if hideCamera is enabled
+    if (this.config.hideCamera) {
+      let cameraMetadata: any = null;
+      try {
+        const metadataStr = sessionStorage.getItem('cameraMetadata');
+        if (metadataStr) {
+          cameraMetadata = JSON.parse(metadataStr);
+        }
+      } catch (e) {
+        console.warn('Failed to parse camera metadata:', e);
+      }
+      
+      if (cameraMetadata) {
+        // Calculate camera mask position and size in export canvas coordinates
+        // The video is scaled to fit the export canvas, so we need to account for that
+        const videoAspect = this.config.videoWidth / this.config.videoHeight;
+        const canvasAspect = w / h;
+        
+        let videoDisplayWidth: number, videoDisplayHeight: number, videoDisplayX: number, videoDisplayY: number;
+        
+        if (videoAspect > canvasAspect) {
+          // Video is wider - fit to width
+          videoDisplayWidth = w;
+          videoDisplayHeight = w / videoAspect;
+          videoDisplayX = 0;
+          videoDisplayY = (h - videoDisplayHeight) / 2;
+        } else {
+          // Video is taller - fit to height
+          videoDisplayHeight = h;
+          videoDisplayWidth = h * videoAspect;
+          videoDisplayX = (w - videoDisplayWidth) / 2;
+          videoDisplayY = 0;
+        }
+        
+        // Calculate camera mask position in canvas coordinates
+        let maskX: number, maskY: number, maskWidth: number, maskHeight: number;
+        
+        if (cameraMetadata.absoluteX !== undefined) {
+          // Use absolute positions from recording
+          const scaleX = videoDisplayWidth / this.config.videoWidth;
+          const scaleY = videoDisplayHeight / this.config.videoHeight;
+          maskX = videoDisplayX + (cameraMetadata.absoluteX * scaleX);
+          maskY = videoDisplayY + (cameraMetadata.absoluteY * scaleY);
+          maskWidth = cameraMetadata.absoluteWidth * scaleX;
+          maskHeight = cameraMetadata.absoluteHeight * scaleY;
+        } else if (cameraMetadata.x !== undefined) {
+          // Use normalized positions
+          maskX = videoDisplayX + (cameraMetadata.x * videoDisplayWidth);
+          maskY = videoDisplayY + (cameraMetadata.y * videoDisplayHeight);
+          maskWidth = cameraMetadata.width * videoDisplayWidth;
+          maskHeight = cameraMetadata.height * videoDisplayHeight;
+        } else {
+          // Fallback: bottom-right corner
+          const cameraSize = Math.min(videoDisplayWidth * 0.15, videoDisplayHeight * 0.15, 300);
+          maskX = videoDisplayX + videoDisplayWidth - cameraSize - 20;
+          maskY = videoDisplayY + videoDisplayHeight - cameraSize - 20;
+          maskWidth = cameraSize;
+          maskHeight = cameraSize;
+        }
+        
+        // Draw black rectangle to mask camera
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(maskX, maskY, maskWidth, maskHeight);
+      }
     }
   }
 
