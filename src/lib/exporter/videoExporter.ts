@@ -2,6 +2,7 @@ import type { ExportConfig, ExportProgress, ExportResult } from './types';
 import { VideoFileDecoder } from './videoDecoder';
 import { FrameRenderer } from './frameRenderer';
 import { VideoMuxer } from './muxer';
+import { AudioExtractor } from './audioExtractor';
 import type { ZoomRegion, CropRegion, TrimRegion } from '@/components/video-editor/types';
 
 interface VideoExporterConfig extends ExportConfig {
@@ -9,6 +10,7 @@ interface VideoExporterConfig extends ExportConfig {
   cameraVideoUrl?: string;
   cameraSize?: number;
   cameraPosition?: { x: number; y: number };
+  cameraShape?: 'circle' | 'squircle' | 'square';
   wallpaper: string;
   zoomRegions: ZoomRegion[];
   trimRegions?: TrimRegion[];
@@ -30,6 +32,9 @@ export class VideoExporter {
   private cameraDecoder: VideoFileDecoder | null = null;
   private renderer: FrameRenderer | null = null;
   private encoder: VideoEncoder | null = null;
+  private audioDecoder: AudioDecoder | null = null;
+  private audioEncoder: AudioEncoder | null = null;
+  private audioExtractor: AudioExtractor | null = null;
   private muxer: VideoMuxer | null = null;
   private cancelled = false;
   private encodeQueue = 0;
@@ -40,6 +45,9 @@ export class VideoExporter {
   // Track muxing promises for parallel processing
   private muxingPromises: Promise<void>[] = [];
   private chunkCount = 0;
+  private hasAudio = false;
+  private audioChunks: EncodedAudioChunk[] = [];
+  private audioProcessingPromise: Promise<void> | null = null;
 
   constructor(config: VideoExporterConfig) {
     this.config = config;
@@ -83,6 +91,26 @@ export class VideoExporter {
       // Initialize decoder and load main video
       this.decoder = new VideoFileDecoder();
       const videoInfo = await this.decoder.loadVideo(this.config.videoUrl);
+      
+      // Check if video has audio - we'll extract it using FFmpeg
+      // Assume audio exists if it's a webm/mp4 file (MediaRecorder typically includes audio)
+      // FFmpeg will tell us if there's no audio during extraction
+      this.hasAudio = this.config.videoUrl.includes('.webm') || this.config.videoUrl.includes('.mp4');
+      console.log('[VideoExporter] Will attempt audio extraction:', this.hasAudio, 'for video:', this.config.videoUrl);
+      
+      // Initialize audio extractor if audio is expected
+      if (this.hasAudio) {
+        try {
+          console.log('[VideoExporter] Initializing audio extractor...');
+          this.audioExtractor = new AudioExtractor();
+          await this.audioExtractor.initialize();
+          console.log('[VideoExporter] Audio extractor initialized successfully');
+        } catch (error) {
+          console.error('[VideoExporter] Failed to initialize audio extractor:', error);
+          console.error('[VideoExporter] Error details:', error instanceof Error ? error.stack : String(error));
+          this.hasAudio = false;
+        }
+      }
 
       // Optionally initialize camera decoder if camera video provided
       let cameraVideoElement: HTMLVideoElement | null = null;
@@ -120,9 +148,18 @@ export class VideoExporter {
       // Initialize video encoder
       await this.initializeEncoder();
 
-      // Initialize muxer
-      this.muxer = new VideoMuxer(this.config, false);
+      // Initialize muxer first (needed for audio encoder)
+      console.log('[VideoExporter] Initializing muxer with hasAudio:', this.hasAudio);
+      this.muxer = new VideoMuxer(this.config, this.hasAudio);
       await this.muxer.initialize();
+      console.log('[VideoExporter] Muxer initialized');
+
+      // Initialize audio decoder and encoder if video has audio (after muxer is ready)
+      if (this.hasAudio) {
+        console.log('[VideoExporter] Initializing audio processing...');
+        await this.initializeAudioProcessing();
+        console.log('[VideoExporter] Audio processing initialized, hasAudio:', this.hasAudio, 'encoder:', !!this.audioEncoder);
+      }
 
       // Get the video element for frame extraction
       const videoElement = this.decoder.getVideoElement();
@@ -137,6 +174,11 @@ export class VideoExporter {
       console.log('[VideoExporter] Original duration:', videoInfo.duration, 's');
       console.log('[VideoExporter] Effective duration:', effectiveDuration, 's');
       console.log('[VideoExporter] Total frames to export:', totalFrames);
+
+      // Start audio processing in parallel with video encoding
+      if (this.hasAudio) {
+        this.audioProcessingPromise = this.processAudio(this.config.videoUrl, videoInfo.duration);
+      }
 
       // Process frames continuously without batching delays
       const frameDuration = 1_000_000 / this.config.frameRate; // in microseconds
@@ -202,27 +244,28 @@ export class VideoExporter {
             const cw = canvas.width;
             const ch = canvas.height;
             
-            // Get camera shape from sessionStorage
-            let shape: 'circle' | 'squircle' | 'square' = 'squircle';
-            try {
-              const metadataStr = sessionStorage.getItem('cameraMetadata');
-              if (metadataStr) {
-                const metadata = JSON.parse(metadataStr);
-                if (metadata.shape && ['circle', 'squircle', 'square'].includes(metadata.shape)) {
-                  shape = metadata.shape;
+            // Get camera shape from config (preferred) or fallback to localStorage
+            let shape: 'circle' | 'squircle' | 'square' = this.config.cameraShape || 'squircle';
+            if (!shape) {
+              try {
+                const metadataStr = localStorage.getItem('cameraMetadata');
+                if (metadataStr) {
+                  const metadata = JSON.parse(metadataStr);
+                  if (metadata.shape && ['circle', 'squircle', 'square'].includes(metadata.shape)) {
+                    shape = metadata.shape;
+                  }
                 }
+              } catch (e) {
+                console.warn('[VideoExporter] Failed to parse camera metadata for shape:', e);
               }
-            } catch (e) {
-              console.warn('[VideoExporter] Failed to parse camera metadata for shape:', e);
             }
             
-            // For circle, make it square; for others, maintain aspect ratio
+            // All shapes should be square to maintain consistent appearance
             // Use cameraSize from config (default 150px) to match editor
             const cameraSize = this.config.cameraSize || 150;
             const baseSize = Math.min(cw * (cameraSize / 1920), cameraSize); // Scale based on canvas width, but cap at cameraSize
-            const isCircle = shape === 'circle';
             const overlayWidth = baseSize;
-            const overlayHeight = isCircle ? baseSize : (cameraVideoElement.videoHeight / cameraVideoElement.videoWidth) * baseSize;
+            const overlayHeight = baseSize; // Always square for all shapes
             
             // Get camera position from config (default bottom-right: 92%, 92% to keep camera fully visible)
             const cameraPos = this.config.cameraPosition || { x: 92, y: 92 };
@@ -235,14 +278,14 @@ export class VideoExporter {
             const clampedX = Math.max(0, Math.min(cw - overlayWidth, x));
             const clampedY = Math.max(0, Math.min(ch - overlayHeight, y));
             
-            // Calculate border radius
+            // Calculate border radius based on shape
             let borderRadius = 48; // Default to squircle (3rem = 48px)
             if (shape === 'circle') {
-              borderRadius = Math.min(overlayWidth, overlayHeight) / 2;
+              borderRadius = overlayWidth / 2; // Perfect circle
             } else if (shape === 'squircle') {
-              borderRadius = 48; // 3rem
+              borderRadius = 48; // 3rem - rounded rectangle
             } else if (shape === 'square') {
-              borderRadius = 16; // 1rem
+              borderRadius = 16; // 1rem - slightly rounded square
             }
             
             // Draw camera with rounded corners using clipping path
@@ -262,31 +305,27 @@ export class VideoExporter {
               ctx.closePath();
               ctx.clip();
             }
-            // For circle, draw centered and cropped; for others, fill the rect
-            if (isCircle) {
-              // Draw video centered and cropped to square
-              const sourceAspect = cameraVideoElement.videoWidth / cameraVideoElement.videoHeight;
-              let drawWidth = overlayWidth;
-              let drawHeight = overlayHeight;
-              let drawX = x;
-              let drawY = y;
-              
-              if (sourceAspect > 1) {
-                // Video is wider - fit to height and crop width
-                drawHeight = overlayHeight;
-                drawWidth = overlayHeight * sourceAspect;
-                drawX = clampedX - (drawWidth - overlayWidth) / 2;
-              } else {
-                // Video is taller - fit to width and crop height
-                drawWidth = overlayWidth;
-                drawHeight = overlayWidth / sourceAspect;
-                drawY = clampedY - (drawHeight - overlayHeight) / 2;
-              }
-              
-              ctx.drawImage(cameraVideoElement, drawX, drawY, drawWidth, drawHeight);
+            
+            // Draw video centered and cropped to square for all shapes
+            const sourceAspect = cameraVideoElement.videoWidth / cameraVideoElement.videoHeight;
+            let drawWidth = overlayWidth;
+            let drawHeight = overlayHeight;
+            let drawX = clampedX;
+            let drawY = clampedY;
+            
+            if (sourceAspect > 1) {
+              // Video is wider - fit to height and crop width
+              drawHeight = overlayHeight;
+              drawWidth = overlayHeight * sourceAspect;
+              drawX = clampedX - (drawWidth - overlayWidth) / 2;
             } else {
-              ctx.drawImage(cameraVideoElement, clampedX, clampedY, overlayWidth, overlayHeight);
+              // Video is taller - fit to width and crop height
+              drawWidth = overlayWidth;
+              drawHeight = overlayWidth / sourceAspect;
+              drawY = clampedY - (drawHeight - overlayHeight) / 2;
             }
+            
+            ctx.drawImage(cameraVideoElement, drawX, drawY, drawWidth, drawHeight);
             ctx.restore();
           }
         }
@@ -337,6 +376,20 @@ export class VideoExporter {
       // Finalize encoding
       if (this.encoder && this.encoder.state === 'configured') {
         await this.encoder.flush();
+      }
+
+      // Process audio if available (runs in parallel with video encoding)
+      if (this.hasAudio && this.audioProcessingPromise) {
+        console.log('[VideoExporter] Waiting for audio processing to complete...');
+        try {
+          await this.audioProcessingPromise;
+          console.log('[VideoExporter] Audio processing completed successfully');
+        } catch (error) {
+          console.error('[VideoExporter] Audio processing failed:', error);
+          this.hasAudio = false;
+        }
+      } else {
+        console.log('[VideoExporter] No audio processing promise - audio will not be included');
       }
 
       // Wait for all muxing operations to complete
@@ -454,6 +507,210 @@ export class VideoExporter {
     }
   }
 
+  private async initializeAudioProcessing(): Promise<void> {
+    if (!this.hasAudio || !this.audioExtractor) {
+      console.warn('[VideoExporter] Cannot initialize audio processing - missing requirements', {
+        hasAudio: this.hasAudio,
+        hasExtractor: !!this.audioExtractor
+      });
+      return;
+    }
+
+    if (!this.muxer) {
+      console.error('[VideoExporter] Muxer not initialized yet - this should not happen');
+      return;
+    }
+
+    try {
+      // Initialize audio encoder for Opus codec
+      let audioChunkCount = 0;
+      let audioDescription: Uint8Array | undefined;
+      
+      this.audioEncoder = new AudioEncoder({
+        output: (chunk, meta) => {
+          audioChunkCount++;
+          
+          // Capture decoder config metadata from encoder output (needed for muxer)
+          if (meta?.decoderConfig?.description && !audioDescription) {
+            const desc = meta.decoderConfig.description;
+            audioDescription = new Uint8Array(desc instanceof ArrayBuffer ? desc : (desc as any));
+            console.log('[VideoExporter] Captured audio decoder config, size:', audioDescription.length);
+          }
+          
+          // Add encoded audio chunk to muxer with metadata
+          // mediabunny requires metadata, especially for the first chunk
+          if (this.muxer) {
+            const isFirstChunk = audioChunkCount === 1;
+            
+            // Create metadata - mediabunny needs decoderConfig for audio
+            const audioMeta: EncodedAudioChunkMetadata = {
+              decoderConfig: {
+                codec: 'opus',
+                sampleRate: 48000,
+                numberOfChannels: 2,
+                // Include description if available from encoder, otherwise mediabunny will generate it
+                ...(audioDescription ? { description: audioDescription } : {}),
+              },
+            };
+            
+            this.muxer.addAudioChunk(chunk, audioMeta).catch(err => {
+              console.error('[VideoExporter] Error adding audio chunk to muxer:', err);
+            });
+            
+            if (audioChunkCount % 10 === 0 || audioChunkCount === 1) {
+              console.log('[VideoExporter] Added audio chunk', audioChunkCount, 'timestamp:', chunk.timestamp, 'duration:', chunk.duration, 'hasMeta:', !!audioMeta);
+            }
+          } else {
+            console.warn('[VideoExporter] Cannot add audio chunk - muxer not available');
+          }
+        },
+        error: (error) => {
+          console.error('[VideoExporter] Audio encoder error:', error);
+        },
+      });
+
+      const audioConfig: AudioEncoderConfig = {
+        codec: 'opus',
+        sampleRate: 48000,
+        numberOfChannels: 2,
+        bitrate: 128000,
+      };
+
+      const support = await AudioEncoder.isConfigSupported(audioConfig);
+      if (support.supported) {
+        this.audioEncoder.configure(audioConfig);
+        console.log('[VideoExporter] Audio encoder initialized');
+      } else {
+        console.warn('[VideoExporter] Opus audio encoder not supported');
+        this.hasAudio = false;
+      }
+    } catch (error) {
+      console.error('[VideoExporter] Error initializing audio processing:', error);
+      this.hasAudio = false;
+    }
+  }
+
+  /**
+   * Extracts and processes audio from the source video
+   * This runs in parallel with video encoding
+   */
+  private async processAudio(videoUrl: string, duration: number): Promise<void> {
+    if (!this.hasAudio || !this.audioExtractor || !this.audioEncoder || !this.muxer) {
+      console.log('[VideoExporter] Skipping audio processing - conditions not met', {
+        hasAudio: this.hasAudio,
+        hasExtractor: !!this.audioExtractor,
+        hasEncoder: !!this.audioEncoder,
+        hasMuxer: !!this.muxer
+      });
+      return;
+    }
+
+    try {
+      console.log('[VideoExporter] Starting audio extraction from video:', videoUrl);
+      
+      // Extract audio as PCM using FFmpeg
+      const channelData = await this.audioExtractor.extractAudioAsPCM(videoUrl);
+      
+      if (!channelData || channelData.length === 0) {
+        console.warn('[VideoExporter] No audio data extracted - video will be silent');
+        this.hasAudio = false;
+        return;
+      }
+
+      const sampleRate = 48000;
+      const numberOfChannels = channelData.length;
+      const samplesPerChannel = channelData[0].length;
+      
+      console.log('[VideoExporter] Audio extracted:', {
+        channels: numberOfChannels,
+        samples: samplesPerChannel,
+        duration: samplesPerChannel / sampleRate
+      });
+
+      // Process audio in chunks to create AudioData and encode
+      const chunkSize = 4800; // ~100ms at 48kHz (4800 samples)
+      let processedSamples = 0;
+      
+      while (processedSamples < samplesPerChannel && !this.cancelled) {
+        const chunkSamples = Math.min(chunkSize, samplesPerChannel - processedSamples);
+        const timestamp = (processedSamples / sampleRate) * 1_000_000; // microseconds
+        
+        // Extract chunk from each channel and interleave for f32 format
+        // f32 format requires interleaved data: [L0, R0, L1, R1, L2, R2, ...]
+        const interleavedData = new Float32Array(chunkSamples * numberOfChannels);
+        for (let i = 0; i < chunkSamples; i++) {
+          for (let ch = 0; ch < numberOfChannels; ch++) {
+            interleavedData[i * numberOfChannels + ch] = channelData[ch][processedSamples + i];
+          }
+        }
+
+        // Verify the data format before creating AudioData
+        if (processedSamples === 0) {
+          console.log('[VideoExporter] First audio chunk - verifying data format:', {
+            interleavedDataType: interleavedData.constructor?.name,
+            isFloat32Array: interleavedData instanceof Float32Array,
+            length: interleavedData.length,
+            buffer: interleavedData.buffer instanceof ArrayBuffer,
+            expectedLength: chunkSamples * numberOfChannels
+          });
+        }
+
+        // Create AudioData using f32 format (interleaved) instead of f32-planar
+        // f32 format uses a single Float32Array with interleaved channels
+        let audioData: AudioData;
+        try {
+          audioData = new AudioData({
+            format: 'f32', // Use interleaved format instead of planar
+            sampleRate,
+            numberOfFrames: chunkSamples,
+            numberOfChannels,
+            timestamp,
+            data: interleavedData, // Single interleaved Float32Array
+          });
+        } catch (error) {
+          console.error('[VideoExporter] AudioData construction failed:', error);
+          console.error('[VideoExporter] Data details:', {
+            format: 'f32',
+            sampleRate,
+            numberOfFrames: chunkSamples,
+            numberOfChannels,
+            timestamp,
+            dataType: interleavedData.constructor?.name,
+            dataLength: interleavedData.length,
+            isFloat32Array: interleavedData instanceof Float32Array,
+            buffer: interleavedData.buffer instanceof ArrayBuffer
+          });
+          throw error;
+        }
+
+        // Encode audio chunk
+        if (this.audioEncoder && this.audioEncoder.state === 'configured') {
+          this.audioEncoder.encode(audioData);
+        }
+        
+        audioData.close();
+        processedSamples += chunkSamples;
+      }
+
+      // Flush audio encoder
+      if (this.audioEncoder && this.audioEncoder.state === 'configured') {
+        console.log('[VideoExporter] Flushing audio encoder...');
+        await this.audioEncoder.flush();
+        console.log('[VideoExporter] Audio encoder flushed');
+      } else {
+        console.warn('[VideoExporter] Cannot flush audio encoder - state:', this.audioEncoder?.state);
+      }
+
+      console.log('[VideoExporter] Audio processing complete - processed', processedSamples, 'samples');
+    } catch (error) {
+      console.error('[VideoExporter] Error processing audio:', error);
+      console.warn('[VideoExporter] Continuing export without audio');
+      // Disable audio to prevent muxer errors
+      this.hasAudio = false;
+      // Don't fail the export if audio extraction fails - video will be silent
+    }
+  }
+
   cancel(): void {
     this.cancelled = true;
     this.cleanup();
@@ -469,6 +726,33 @@ export class VideoExporter {
         console.warn('Error closing encoder:', e);
       }
       this.encoder = null;
+    }
+
+    if (this.audioEncoder) {
+      try {
+        if (this.audioEncoder.state === 'configured') {
+          this.audioEncoder.close();
+        }
+      } catch (e) {
+        console.warn('Error closing audio encoder:', e);
+      }
+      this.audioEncoder = null;
+    }
+
+    if (this.audioDecoder) {
+      try {
+        if (this.audioDecoder.state === 'configured') {
+          this.audioDecoder.close();
+        }
+      } catch (e) {
+        console.warn('Error closing audio decoder:', e);
+      }
+      this.audioDecoder = null;
+    }
+
+    if (this.audioExtractor) {
+      this.audioExtractor.cleanup();
+      this.audioExtractor = null;
     }
 
     if (this.decoder) {

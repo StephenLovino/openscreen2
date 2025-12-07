@@ -110,4 +110,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       // Window will be closed by main process
     }
   },
+  saveProjectData: (projectData: any) => {
+    return ipcRenderer.invoke('save-project-data', projectData)
+  },
 })

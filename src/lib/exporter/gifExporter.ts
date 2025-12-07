@@ -8,6 +8,7 @@ interface GifExporterConfig {
   cameraVideoUrl?: string;
   cameraSize?: number;
   cameraPosition?: { x: number; y: number };
+  cameraShape?: 'circle' | 'squircle' | 'square';
   wallpaper: string;
   zoomRegions: ZoomRegion[];
   trimRegions?: TrimRegion[];
@@ -132,16 +133,98 @@ export class GifExporter {
           videoElement.addEventListener('seeked', onSeeked);
         });
 
-        // Render frame
-        const frame = await this.renderer.renderFrame(
-          videoElement,
-          sourceTimeSeconds * 1000,
-          cameraVideoElement,
-          this.config.cameraSize,
-          this.config.cameraPosition,
-          this.config.hideCamera
-        );
+        // Create VideoFrame from video element
+        const videoFrame = new VideoFrame(videoElement, {
+          timestamp: sourceTimeSeconds * 1_000_000, // microseconds
+        });
 
+        // Render frame using FrameRenderer
+        await this.renderer.renderFrame(videoFrame, sourceTimeSeconds * 1_000_000);
+        
+        // Get the canvas and draw camera overlay if needed
+        const canvas = this.renderer.getCanvas();
+        const ctx = canvas.getContext('2d');
+        
+        if (ctx && cameraVideoElement && !this.config.hideCamera && 
+            cameraVideoElement.videoWidth && cameraVideoElement.videoHeight) {
+          const cw = canvas.width;
+          const ch = canvas.height;
+          
+          // Get camera shape from config
+          const shape = this.config.cameraShape || 'squircle';
+          const cameraSize = this.config.cameraSize || 150;
+          const baseSize = Math.min(cw * (cameraSize / 1920), cameraSize);
+          // All shapes should be square to maintain consistent appearance
+          const overlayWidth = baseSize;
+          const overlayHeight = baseSize; // Always square for all shapes
+          
+          // Get camera position
+          const cameraPos = this.config.cameraPosition || { x: 92, y: 92 };
+          const x = (cameraPos.x / 100) * cw - overlayWidth / 2;
+          const y = (cameraPos.y / 100) * ch - overlayHeight / 2;
+          
+          // Clamp to canvas bounds
+          const clampedX = Math.max(0, Math.min(cw - overlayWidth, x));
+          const clampedY = Math.max(0, Math.min(ch - overlayHeight, y));
+          
+          // Calculate border radius based on shape
+          let borderRadius = 48; // Default squircle (3rem = 48px)
+          if (shape === 'circle') {
+            borderRadius = overlayWidth / 2; // Perfect circle
+          } else if (shape === 'squircle') {
+            borderRadius = 48; // 3rem - rounded rectangle
+          } else if (shape === 'square') {
+            borderRadius = 16; // 1rem - slightly rounded square
+          }
+          
+          // Draw camera overlay with rounded corners using clipping path
+          ctx.save();
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(clampedX, clampedY, overlayWidth, overlayHeight, borderRadius);
+          } else {
+            // Fallback for browsers without roundRect
+            const r = Math.min(borderRadius, overlayWidth / 2, overlayHeight / 2);
+            ctx.moveTo(clampedX + r, clampedY);
+            ctx.lineTo(clampedX + overlayWidth - r, clampedY);
+            ctx.quadraticCurveTo(clampedX + overlayWidth, clampedY, clampedX + overlayWidth, clampedY + r);
+            ctx.lineTo(clampedX + overlayWidth, clampedY + overlayHeight - r);
+            ctx.quadraticCurveTo(clampedX + overlayWidth, clampedY + overlayHeight, clampedX + overlayWidth - r, clampedY + overlayHeight);
+            ctx.lineTo(clampedX + r, clampedY + overlayHeight);
+            ctx.quadraticCurveTo(clampedX, clampedY + overlayHeight, clampedX, clampedY + overlayHeight - r);
+            ctx.lineTo(clampedX, clampedY + r);
+            ctx.quadraticCurveTo(clampedX, clampedY, clampedX + r, clampedY);
+            ctx.closePath();
+          }
+          ctx.clip();
+          
+          // Draw video centered and cropped to square for all shapes
+          const sourceAspect = cameraVideoElement.videoWidth / cameraVideoElement.videoHeight;
+          let drawWidth = overlayWidth;
+          let drawHeight = overlayHeight;
+          let drawX = clampedX;
+          let drawY = clampedY;
+          
+          if (sourceAspect > 1) {
+            // Video is wider - fit to height and crop width
+            drawHeight = overlayHeight;
+            drawWidth = overlayHeight * sourceAspect;
+            drawX = clampedX - (drawWidth - overlayWidth) / 2;
+          } else {
+            // Video is taller - fit to width and crop height
+            drawWidth = overlayWidth;
+            drawHeight = overlayWidth / sourceAspect;
+            drawY = clampedY - (drawHeight - overlayHeight) / 2;
+          }
+          
+          ctx.drawImage(cameraVideoElement, drawX, drawY, drawWidth, drawHeight);
+          ctx.restore();
+        }
+        
+        // Get ImageData from canvas for GIF
+        const frame = ctx!.getImageData(0, 0, canvas.width, canvas.height);
+        videoFrame.close();
+        
         frames.push(frame);
         frameIndex++;
 

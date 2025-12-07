@@ -235,6 +235,100 @@ export default function VideoEditor() {
     loadVideo();
   }, []);
 
+  // Handle menu actions
+  useEffect(() => {
+    if (!window.electronAPI?.on) return;
+
+    // Listen for save project request from menu
+    const handleSaveProject = async () => {
+      try {
+        const projectData = {
+          videoPath,
+          cameraVideoPath,
+          wallpaper,
+          shadowIntensity,
+          showBlur,
+          motionBlurEnabled,
+          borderRadius,
+          padding,
+          cropRegion,
+          hideCamera,
+          cameraShape,
+          cameraSize,
+          cameraPosition,
+          zoomRegions,
+          trimRegions,
+          exportResolution,
+          exportFormat,
+          timestamp: new Date().toISOString(),
+        };
+
+        const result = await apiBridge.saveProjectData(projectData);
+        if (result.success) {
+          toast.success('Project saved successfully', {
+            description: result.path ? `Saved to: ${result.path}` : 'Project saved',
+          });
+        } else {
+          toast.error('Failed to save project', {
+            description: result.error || 'Unknown error',
+          });
+        }
+      } catch (error) {
+        console.error('Error saving project:', error);
+        toast.error('Failed to save project', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    };
+
+    // Listen for re-record action from menu
+    const handleReRecord = async () => {
+      await apiBridge.openSourceSelector('screen');
+      // Close the editor window (main process will handle this)
+      if (window.electronAPI?.send) {
+        window.electronAPI.send('close-editor');
+      }
+    };
+
+    // Listen for discard & exit action from menu
+    const handleDiscardExit = () => {
+      // Close the editor window (main process will handle this)
+      if (window.electronAPI?.send) {
+        window.electronAPI.send('close-editor');
+      }
+    };
+
+    window.electronAPI.on('save-project-request', handleSaveProject);
+    window.electronAPI.on('menu-re-record', handleReRecord);
+    window.electronAPI.on('menu-discard-exit', handleDiscardExit);
+
+    return () => {
+      if (window.electronAPI?.off) {
+        window.electronAPI.off('save-project-request', handleSaveProject);
+        window.electronAPI.off('menu-re-record', handleReRecord);
+        window.electronAPI.off('menu-discard-exit', handleDiscardExit);
+      }
+    };
+  }, [
+    videoPath,
+    cameraVideoPath,
+    wallpaper,
+    shadowIntensity,
+    showBlur,
+    motionBlurEnabled,
+    borderRadius,
+    padding,
+    cropRegion,
+    hideCamera,
+    cameraShape,
+    cameraSize,
+    cameraPosition,
+    zoomRegions,
+    trimRegions,
+    exportResolution,
+    exportFormat,
+  ]);
+
   function togglePlayPause() {
     const playback = videoPlaybackRef.current;
   if (!playback || !playback.video) return;
@@ -470,6 +564,7 @@ export default function VideoEditor() {
           cameraVideoUrl: cameraVideoPath || undefined,
           cameraSize: cameraSize,
           cameraPosition: cameraPosition,
+          cameraShape: cameraShape,
           width: exportWidth,
           height: exportHeight,
           frameRate: 30, // GIFs typically use lower frame rate
@@ -499,6 +594,7 @@ export default function VideoEditor() {
           cameraVideoUrl: cameraVideoPath || undefined,
           cameraSize: cameraSize,
           cameraPosition: cameraPosition,
+          cameraShape: cameraShape,
           width: exportWidth,
           height: exportHeight,
           frameRate: 60,
@@ -554,7 +650,7 @@ export default function VideoEditor() {
       setIsExporting(false);
       exporterRef.current = null;
     }
-  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, isPlaying, exportResolution, exportFormat, hideCamera, cameraSize, cameraPosition]);
+  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, isPlaying, exportResolution, exportFormat, hideCamera, cameraSize, cameraPosition, cameraShape]);
 
   const handleCancelExport = useCallback(() => {
     if (exporterRef.current) {

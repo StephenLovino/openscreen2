@@ -63,5 +63,6 @@ interface Window {
     waitForCameraWarningDialogResponse?: () => Promise<'continue' | 'cancel'>
     send?: (channel: string, data?: any) => void
     closeWindow?: () => void
+    saveProjectData?: (projectData: any) => Promise<{ success: boolean; path?: string; error?: string }>
   }
 }

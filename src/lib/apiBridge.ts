@@ -454,5 +454,21 @@ export const apiBridge = {
     }
     return 'cancel';
   },
+
+  // Save project data
+  async saveProjectData(projectData: any): Promise<{ success: boolean; path?: string; error?: string }> {
+    if (isElectron() && window.electronAPI?.saveProjectData) {
+      return await window.electronAPI.saveProjectData(projectData);
+    }
+    // Web fallback: save to localStorage
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const projectKey = `project-${timestamp}`;
+      localStorage.setItem(projectKey, JSON.stringify(projectData));
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  },
 };
 

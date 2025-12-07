@@ -104,5 +104,8 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   },
   closeWindow: () => {
     if (window.electronAPI && window.electronAPI.closeWindow) ;
+  },
+  saveProjectData: (projectData) => {
+    return electron.ipcRenderer.invoke("save-project-data", projectData);
   }
 });

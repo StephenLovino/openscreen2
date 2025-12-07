@@ -800,4 +800,63 @@ export function registerIpcHandlers(
       });
     });
   });
+
+  // Menu action handlers
+  ipcMain.on('menu-save-project', async () => {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      // Request the editor to save project data
+      mainWin.webContents.send('save-project-request');
+    }
+  });
+
+  ipcMain.on('menu-re-record', () => {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.close();
+    }
+    // Open source selector for re-recording
+    createSourceSelectorWindow('screen');
+  });
+
+  ipcMain.on('menu-discard-exit', () => {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.close();
+    }
+    // On macOS, keep app running; on other platforms, quit if no windows
+    if (process.platform !== 'darwin') {
+      const allWindows = BrowserWindow.getAllWindows();
+      if (allWindows.length === 0) {
+        app.quit();
+      }
+    }
+  });
+
+  // Handle close editor request from renderer
+  ipcMain.on('close-editor', () => {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.close();
+    }
+  });
+
+  // Handle save project data from renderer
+  ipcMain.handle('save-project-data', async (_, projectData: any) => {
+    try {
+      const PROJECTS_DIR = path.join(app.getPath('userData'), 'projects');
+      await fs.mkdir(PROJECTS_DIR, { recursive: true });
+      
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const projectFileName = `project-${timestamp}.json`;
+      const projectPath = path.join(PROJECTS_DIR, projectFileName);
+      
+      await fs.writeFile(projectPath, JSON.stringify(projectData, null, 2), 'utf-8');
+      
+      return { success: true, path: projectPath };
+    } catch (error) {
+      console.error('Failed to save project:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
 }

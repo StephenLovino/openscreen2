@@ -2,8 +2,8 @@ import { ipcMain, screen, BrowserWindow, desktopCapturer, shell, app, dialog, na
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs/promises";
-const __dirname$2 = path.dirname(fileURLToPath(import.meta.url));
-const APP_ROOT = path.join(__dirname$2, "..");
+const __dirname$3 = path.dirname(fileURLToPath(import.meta.url));
+const APP_ROOT = path.join(__dirname$3, "..");
 const VITE_DEV_SERVER_URL$1 = process.env["VITE_DEV_SERVER_URL"];
 const RENDERER_DIST$1 = path.join(APP_ROOT, "dist");
 let hudOverlayWindow = null;
@@ -35,7 +35,7 @@ function createHudOverlayWindow() {
     skipTaskbar: true,
     hasShadow: false,
     webPreferences: {
-      preload: path.join(__dirname$2, "preload.mjs"),
+      preload: path.join(__dirname$3, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false
@@ -74,7 +74,7 @@ function createEditorWindow() {
     title: "AHA Clips",
     backgroundColor: "#000000",
     webPreferences: {
-      preload: path.join(__dirname$2, "preload.mjs"),
+      preload: path.join(__dirname$3, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false,
@@ -109,7 +109,7 @@ function createSourceSelectorWindow(mode) {
     transparent: true,
     backgroundColor: "#00000000",
     webPreferences: {
-      preload: path.join(__dirname$2, "preload.mjs"),
+      preload: path.join(__dirname$3, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true
     }
@@ -158,7 +158,7 @@ function createCameraPreviewWindow() {
     movable: true,
     // Allow window to be moved
     webPreferences: {
-      preload: path.join(__dirname$2, "preload.mjs"),
+      preload: path.join(__dirname$3, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false
@@ -220,7 +220,7 @@ function createCameraWarningDialogWindow() {
     transparent: true,
     backgroundColor: "#00000000",
     webPreferences: {
-      preload: path.join(__dirname$2, "preload.mjs"),
+      preload: path.join(__dirname$3, "preload.mjs"),
       nodeIntegration: false,
       contextIsolation: true
     }
@@ -235,7 +235,7 @@ function createCameraWarningDialogWindow() {
   }
   return win;
 }
-const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
+const __dirname$2 = path.dirname(fileURLToPath(import.meta.url));
 let selectedSource = null;
 let selectedSources = [];
 let lastGetSourcesLogTime = 0;
@@ -304,7 +304,7 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
         console.log("🔵 IPC: Reloading window with URL:", url);
         sourceSelectorWin.webContents.loadURL(url);
       } else {
-        const APP_ROOT2 = path.join(__dirname$1, "..");
+        const APP_ROOT2 = path.join(__dirname$2, "..");
         const RENDERER_DIST2 = path.join(APP_ROOT2, "dist");
         const query = { windowType: "source-selector" };
         if (mode) {
@@ -558,9 +558,9 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
         console.error("🔵 Auto-zoom: xinput process error:", error);
       });
       clickDetectionProcess = xinputProcess;
-      console.log("🔵 Auto-zoom: Mouse click detection started successfully");
+      console.log("🔵 Auto-zoom: Linux mouse click detection started successfully");
     } catch (error) {
-      console.error("🔵 Auto-zoom: Error starting mouse click detection:", error);
+      console.error("🔵 Auto-zoom: Error starting Linux mouse click detection:", error);
     }
   };
   const stopMouseClickDetection = () => {
@@ -824,8 +824,53 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
       });
     });
   });
+  ipcMain.on("menu-save-project", async () => {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send("save-project-request");
+    }
+  });
+  ipcMain.on("menu-re-record", () => {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.close();
+    }
+    createSourceSelectorWindow2("screen");
+  });
+  ipcMain.on("menu-discard-exit", () => {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.close();
+    }
+    if (process.platform !== "darwin") {
+      const allWindows = BrowserWindow.getAllWindows();
+      if (allWindows.length === 0) {
+        app.quit();
+      }
+    }
+  });
+  ipcMain.on("close-editor", () => {
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.close();
+    }
+  });
+  ipcMain.handle("save-project-data", async (_, projectData) => {
+    try {
+      const PROJECTS_DIR = path.join(app.getPath("userData"), "projects");
+      await fs.mkdir(PROJECTS_DIR, { recursive: true });
+      const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+      const projectFileName = `project-${timestamp}.json`;
+      const projectPath = path.join(PROJECTS_DIR, projectFileName);
+      await fs.writeFile(projectPath, JSON.stringify(projectData, null, 2), "utf-8");
+      return { success: true, path: projectPath };
+    } catch (error) {
+      console.error("Failed to save project:", error);
+      return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+    }
+  });
 }
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 const RECORDINGS_DIR = path.join(app.getPath("userData"), "recordings");
 async function ensureRecordingsDir() {
   try {
@@ -836,7 +881,7 @@ async function ensureRecordingsDir() {
     console.error("Failed to create recordings directory:", error);
   }
 }
-process.env.APP_ROOT = path.join(__dirname, "..");
+process.env.APP_ROOT = path.join(__dirname$1, "..");
 const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
 const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
@@ -879,6 +924,104 @@ function createEditorWindowWrapper() {
     mainWindow = null;
   }
   mainWindow = createEditorWindow();
+  setEditorMenu();
+}
+function setEditorMenu() {
+  const template = [
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Save Project",
+          accelerator: "CmdOrCtrl+S",
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("menu-save-project");
+            }
+          }
+        },
+        {
+          type: "separator"
+        },
+        {
+          label: "Re-record",
+          accelerator: "CmdOrCtrl+R",
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("menu-re-record");
+            }
+          }
+        },
+        {
+          label: "Discard & Exit",
+          accelerator: process.platform === "darwin" ? "Cmd+Q" : "Ctrl+Q",
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("menu-discard-exit");
+            }
+          }
+        }
+      ]
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo", label: "Undo" },
+        { role: "redo", label: "Redo" },
+        { type: "separator" },
+        { role: "cut", label: "Cut" },
+        { role: "copy", label: "Copy" },
+        { role: "paste", label: "Paste" },
+        { role: "selectAll", label: "Select All" }
+      ]
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload", label: "Reload" },
+        { role: "forceReload", label: "Force Reload" },
+        { role: "toggleDevTools", label: "Toggle Developer Tools" },
+        { type: "separator" },
+        { role: "resetZoom", label: "Actual Size" },
+        { role: "zoomIn", label: "Zoom In" },
+        { role: "zoomOut", label: "Zoom Out" },
+        { type: "separator" },
+        { role: "togglefullscreen", label: "Toggle Fullscreen" }
+      ]
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize", label: "Minimize" },
+        { role: "close", label: "Close" }
+      ]
+    }
+  ];
+  if (process.platform === "darwin") {
+    template.unshift({
+      label: app.getName(),
+      submenu: [
+        { role: "about", label: "About " + app.getName() },
+        { type: "separator" },
+        { role: "services", label: "Services" },
+        { type: "separator" },
+        { role: "hide", label: "Hide " + app.getName() },
+        { role: "hideOthers", label: "Hide Others" },
+        { role: "unhide", label: "Show All" },
+        { type: "separator" },
+        { role: "quit", label: "Quit " + app.getName() }
+      ]
+    });
+    template[4].submenu = [
+      { role: "close", label: "Close" },
+      { role: "minimize", label: "Minimize" },
+      { role: "zoom", label: "Zoom" },
+      { type: "separator" },
+      { role: "front", label: "Bring All to Front" }
+    ];
+  }
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
 }
 function createSourceSelectorWindowWrapper(mode) {
   console.log("🔵 main.ts: createSourceSelectorWindowWrapper called with mode:", mode);
