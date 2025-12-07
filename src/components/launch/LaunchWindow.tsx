@@ -191,6 +191,29 @@ export function LaunchWindow() {
     }
   };
 
+  const handleRecordClick = async () => {
+    if (recording) {
+      toggleRecording();
+    } else {
+      // Check if both screen and camera are selected
+      if (hasScreen && hasCamera) {
+        // Show warning dialog in separate window
+        const result = await apiBridge.openCameraWarningDialog();
+        if (result.success) {
+          // Wait for user response
+          const response = await apiBridge.waitForCameraWarningDialogResponse();
+          if (response === 'continue') {
+            toggleRecording();
+          }
+          // If cancel, do nothing
+        }
+      } else {
+        // Start recording directly
+        toggleRecording();
+      }
+    }
+  };
+
   return (
     <div className="w-full h-full flex items-stretch bg-transparent">
       <div
@@ -290,7 +313,7 @@ export function LaunchWindow() {
         <Button
           variant="link"
           size="sm"
-          onClick={hasSelectedSource ? toggleRecording : openSourceSelector}
+          onClick={hasSelectedSource ? handleRecordClick : openSourceSelector}
           disabled={!hasSelectedSource && !recording}
           className={`gap-1 bg-transparent hover:bg-transparent px-0 flex-1 text-center text-xs ${styles.electronNoDrag}`}
         >

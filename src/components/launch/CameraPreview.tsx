@@ -116,7 +116,8 @@ export function CameraPreview() {
   }, []);
 
   // Calculate dimensions based on size
-  const previewSize = size === 'sm' ? 230 : 400;
+  // Match editor overlay size: 250px max (15% of typical screen width)
+  const previewSize = size === 'sm' ? 250 : 400;
   
   // Calculate border radius based on shape
   const getBorderRadius = () => {
@@ -195,19 +196,26 @@ export function CameraPreview() {
   return (
     <div 
       ref={containerRef}
-      className="w-full h-full bg-transparent flex flex-col items-center justify-start relative group"
+      className="bg-transparent flex flex-col items-center justify-start relative group"
       style={{ 
         WebkitAppRegion: 'drag', // Make draggable in Electron
         userSelect: 'none',
+        width: `${previewSize}px`,
+        minWidth: `${previewSize}px`,
+        maxWidth: `${previewSize}px`,
       }}
       onMouseEnter={() => setShowDeviceControls(true)}
       onMouseLeave={() => setShowDeviceControls(false)}
     >
       <div
-        className="relative"
+        className="relative flex-shrink-0"
         style={{
           width: `${previewSize}px`,
           height: `${previewSize}px`,
+          minWidth: `${previewSize}px`,
+          minHeight: `${previewSize}px`,
+          maxWidth: `${previewSize}px`,
+          maxHeight: `${previewSize}px`,
           borderRadius: getBorderRadius(),
           overflow: 'hidden',
           // Remove heavy outer glow so the camera bubble feels more "cut out"
@@ -220,11 +228,19 @@ export function CameraPreview() {
           autoPlay
           playsInline
           muted
-          className="w-full h-full object-cover"
+          className="object-cover"
           style={{
             borderRadius: getBorderRadius(),
-            width: '100%',
-            height: '100%',
+            width: `${previewSize}px`,
+            height: `${previewSize}px`,
+            minWidth: `${previewSize}px`,
+            minHeight: `${previewSize}px`,
+            maxWidth: `${previewSize}px`,
+            maxHeight: `${previewSize}px`,
+            objectFit: 'cover',
+            aspectRatio: '1 / 1',
+            display: 'block',
+            flexShrink: 0,
           }}
         />
         

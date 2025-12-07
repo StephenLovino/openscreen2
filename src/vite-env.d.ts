@@ -56,6 +56,11 @@ interface Window {
     getSelectedSources?: () => Promise<any[]>
     stopCameraTrack?: () => Promise<{ success: boolean; error?: string }>
     stopMicTrack?: () => Promise<{ success: boolean; error?: string }>
+    openCameraWarningDialog?: () => Promise<{ success: boolean; error?: string }>
+    closeCameraWarningDialog?: () => Promise<{ success: boolean }>
+    waitForCameraWarningDialogResponse?: () => Promise<'continue' | 'cancel'>
+    send?: (channel: string, data?: any) => void
+    closeWindow?: () => void
     on?: (channel: string, callback: () => void) => void
     off?: (channel: string, callback: () => void) => void
   }

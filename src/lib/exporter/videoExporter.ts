@@ -7,6 +7,8 @@ import type { ZoomRegion, CropRegion, TrimRegion } from '@/components/video-edit
 interface VideoExporterConfig extends ExportConfig {
   videoUrl: string;
   cameraVideoUrl?: string;
+  cameraSize?: number;
+  cameraPosition?: { x: number; y: number };
   wallpaper: string;
   zoomRegions: ZoomRegion[];
   trimRegions?: TrimRegion[];
@@ -215,12 +217,23 @@ export class VideoExporter {
             }
             
             // For circle, make it square; for others, maintain aspect ratio
-            const baseSize = Math.min(cw * 0.2, 300);
+            // Use cameraSize from config (default 250px) to match editor
+            const cameraSize = this.config.cameraSize || 250;
+            const baseSize = Math.min(cw * (cameraSize / 1920), cameraSize); // Scale based on canvas width, but cap at cameraSize
             const isCircle = shape === 'circle';
             const overlayWidth = baseSize;
             const overlayHeight = isCircle ? baseSize : (cameraVideoElement.videoHeight / cameraVideoElement.videoWidth) * baseSize;
-            const x = cw - overlayWidth - 20;
-            const y = ch - overlayHeight - 20;
+            
+            // Get camera position from config (default bottom-right: 100%, 100%)
+            const cameraPos = this.config.cameraPosition || { x: 100, y: 100 };
+            // Convert percentage to pixel position (x: 0-100%, y: 0-100%)
+            // Position is centered on the point, so adjust by half the overlay size
+            const x = (cameraPos.x / 100) * cw - overlayWidth / 2;
+            const y = (cameraPos.y / 100) * ch - overlayHeight / 2;
+            
+            // Clamp to keep overlay within canvas bounds
+            const clampedX = Math.max(0, Math.min(cw - overlayWidth, x));
+            const clampedY = Math.max(0, Math.min(ch - overlayHeight, y));
             
             // Calculate border radius
             let borderRadius = 48; // Default to squircle (3rem = 48px)
@@ -237,15 +250,15 @@ export class VideoExporter {
             ctx.beginPath();
             if (borderRadius > 0) {
               const r = Math.min(borderRadius, overlayWidth / 2, overlayHeight / 2);
-              ctx.moveTo(x + r, y);
-              ctx.lineTo(x + overlayWidth - r, y);
-              ctx.quadraticCurveTo(x + overlayWidth, y, x + overlayWidth, y + r);
-              ctx.lineTo(x + overlayWidth, y + overlayHeight - r);
-              ctx.quadraticCurveTo(x + overlayWidth, y + overlayHeight, x + overlayWidth - r, y + overlayHeight);
-              ctx.lineTo(x + r, y + overlayHeight);
-              ctx.quadraticCurveTo(x, y + overlayHeight, x, y + overlayHeight - r);
-              ctx.lineTo(x, y + r);
-              ctx.quadraticCurveTo(x, y, x + r, y);
+              ctx.moveTo(clampedX + r, clampedY);
+              ctx.lineTo(clampedX + overlayWidth - r, clampedY);
+              ctx.quadraticCurveTo(clampedX + overlayWidth, clampedY, clampedX + overlayWidth, clampedY + r);
+              ctx.lineTo(clampedX + overlayWidth, clampedY + overlayHeight - r);
+              ctx.quadraticCurveTo(clampedX + overlayWidth, clampedY + overlayHeight, clampedX + overlayWidth - r, clampedY + overlayHeight);
+              ctx.lineTo(clampedX + r, clampedY + overlayHeight);
+              ctx.quadraticCurveTo(clampedX, clampedY + overlayHeight, clampedX, clampedY + overlayHeight - r);
+              ctx.lineTo(clampedX, clampedY + r);
+              ctx.quadraticCurveTo(clampedX, clampedY, clampedX + r, clampedY);
               ctx.closePath();
               ctx.clip();
             }
@@ -262,17 +275,17 @@ export class VideoExporter {
                 // Video is wider - fit to height and crop width
                 drawHeight = overlayHeight;
                 drawWidth = overlayHeight * sourceAspect;
-                drawX = x - (drawWidth - overlayWidth) / 2;
+                drawX = clampedX - (drawWidth - overlayWidth) / 2;
               } else {
                 // Video is taller - fit to width and crop height
                 drawWidth = overlayWidth;
                 drawHeight = overlayWidth / sourceAspect;
-                drawY = y - (drawHeight - overlayHeight) / 2;
+                drawY = clampedY - (drawHeight - overlayHeight) / 2;
               }
               
               ctx.drawImage(cameraVideoElement, drawX, drawY, drawWidth, drawHeight);
             } else {
-              ctx.drawImage(cameraVideoElement, x, y, overlayWidth, overlayHeight);
+              ctx.drawImage(cameraVideoElement, clampedX, clampedY, overlayWidth, overlayHeight);
             }
             ctx.restore();
           }

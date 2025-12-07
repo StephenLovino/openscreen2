@@ -48,6 +48,11 @@ interface Window {
     resizeWindow?: (width: number, height: number) => Promise<{ success: boolean }>
     selectSources?: (sources: any[]) => Promise<any[]>
     getSelectedSources?: () => Promise<any[]>
+    openCameraWarningDialog?: () => Promise<{ success: boolean; error?: string }>
+    closeCameraWarningDialog?: () => Promise<{ success: boolean }>
+    waitForCameraWarningDialogResponse?: () => Promise<'continue' | 'cancel'>
+    send?: (channel: string, data?: any) => void
+    closeWindow?: () => void
   }
 }
 

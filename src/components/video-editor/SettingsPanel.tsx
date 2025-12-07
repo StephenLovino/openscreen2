@@ -68,6 +68,8 @@ interface SettingsPanelProps {
   onHideCameraChange?: (hide: boolean) => void;
   cameraShape?: 'circle' | 'squircle' | 'square';
   onCameraShapeChange?: (shape: 'circle' | 'squircle' | 'square') => void;
+  cameraSize?: number;
+  onCameraSizeChange?: (size: number) => void;
   videoElement?: HTMLVideoElement | null;
   onExport?: () => void;
 }
@@ -83,7 +85,7 @@ const ZOOM_DEPTH_OPTIONS: Array<{ depth: ZoomDepth; label: string }> = [
   { depth: 6, label: "5×" },
 ];
 
-export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, onZoomDepthChange, selectedZoomId, onZoomDelete, shadowIntensity = 0, onShadowChange, showBlur, onBlurChange, motionBlurEnabled = true, onMotionBlurChange, borderRadius = 0, onBorderRadiusChange, padding = 50, onPaddingChange, cropRegion, onCropChange, hideCamera = false, onHideCameraChange, cameraShape = 'squircle', onCameraShapeChange, videoElement, onExport }: SettingsPanelProps) {
+export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, onZoomDepthChange, selectedZoomId, onZoomDelete, shadowIntensity = 0, onShadowChange, showBlur, onBlurChange, motionBlurEnabled = true, onMotionBlurChange, borderRadius = 0, onBorderRadiusChange, padding = 50, onPaddingChange, cropRegion, onCropChange, hideCamera = false, onHideCameraChange, cameraShape = 'squircle', onCameraShapeChange, cameraSize = 250, onCameraSizeChange, videoElement, onExport }: SettingsPanelProps) {
   const [wallpaperPaths, setWallpaperPaths] = useState<string[]>([]);
   const [customImages, setCustomImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -376,6 +378,27 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
               <RectangleHorizontal className="w-4 h-4" />
               <span className="text-xs font-medium">Square</span>
             </Button>
+          </div>
+        </div>
+      )}
+
+      {onCameraSizeChange && !hideCamera && (
+        <div className="mb-4">
+          <div className="text-xs font-medium text-slate-200 mb-3 flex items-center justify-between">
+            <span>Camera Size</span>
+            <span className="text-slate-400 font-mono">{cameraSize}px</span>
+          </div>
+          <Slider
+            value={[cameraSize]}
+            onValueChange={(value) => onCameraSizeChange(value[0])}
+            min={150}
+            max={350}
+            step={10}
+            className="w-full"
+          />
+          <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+            <span>150px</span>
+            <span>350px</span>
           </div>
         </div>
       )}

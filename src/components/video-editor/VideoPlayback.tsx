@@ -34,6 +34,9 @@ interface VideoPlaybackProps {
   trimRegions?: TrimRegion[];
   hideCamera?: boolean;
   cameraVideoPath?: string | null;
+  cameraSize?: number;
+  cameraPosition?: { x: number; y: number };
+  onCameraPositionChange?: (position: { x: number; y: number }) => void;
 }
 
 export interface VideoPlaybackRef {
@@ -69,9 +72,16 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
   trimRegions = [],
   hideCamera = false,
   cameraVideoPath = null,
+  cameraSize = 250,
+  cameraPosition = { x: 0, y: 0 },
+  onCameraPositionChange,
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraOverlayRef = useRef<HTMLDivElement | null>(null);
+  const isDraggingCameraRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const initialPositionRef = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
   const videoSpriteRef = useRef<Sprite | null>(null);
@@ -987,27 +997,100 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
 
         const isCircle = shape === 'circle';
         const borderRadius = shape === 'circle' ? '50%' : shape === 'squircle' ? '3rem' : '1rem';
-        const size = isCircle ? 'min(20%, 300px)' : '20%';
-        const maxSize = isCircle ? '300px' : '300px';
+        // Use dynamic cameraSize prop (default 250px) to ensure square shape
+        const fixedSize = `${cameraSize}px`;
+
+        // Calculate position from percentage (0-100) to CSS positioning
+        // x: 0 = left, 100 = right; y: 0 = top, 100 = bottom
+        const positionX = cameraPosition.x;
+        const positionY = cameraPosition.y;
+
+        const handleCameraPointerDown = (e: React.PointerEvent) => {
+          if (hideCamera) return;
+          e.stopPropagation();
+          e.preventDefault();
+          isDraggingCameraRef.current = true;
+          const container = cameraOverlayRef.current?.parentElement;
+          if (container) {
+            const rect = container.getBoundingClientRect();
+            dragStartRef.current = {
+              x: e.clientX - rect.left,
+              y: e.clientY - rect.top,
+            };
+            initialPositionRef.current = { ...cameraPosition };
+            e.currentTarget.setPointerCapture(e.pointerId);
+          }
+        };
+
+        const handleCameraPointerMove = (e: React.PointerEvent) => {
+          if (!isDraggingCameraRef.current || hideCamera) return;
+          e.preventDefault();
+          const container = cameraOverlayRef.current?.parentElement;
+          if (container && onCameraPositionChange) {
+            const rect = container.getBoundingClientRect();
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
+            
+            const deltaX = currentX - dragStartRef.current.x;
+            const deltaY = currentY - dragStartRef.current.y;
+            
+            // Convert pixel delta to percentage
+            const deltaXPercent = (deltaX / rect.width) * 100;
+            const deltaYPercent = (deltaY / rect.height) * 100;
+            
+            // Calculate new position, clamping to keep camera within bounds
+            const newX = Math.max(0, Math.min(100, initialPositionRef.current.x + deltaXPercent));
+            const newY = Math.max(0, Math.min(100, initialPositionRef.current.y + deltaYPercent));
+            
+            onCameraPositionChange({ x: newX, y: newY });
+          }
+        };
+
+        const handleCameraPointerUp = (e: React.PointerEvent) => {
+          if (isDraggingCameraRef.current) {
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId);
+            } catch {}
+            isDraggingCameraRef.current = false;
+          }
+        };
 
         return (
-          <video
-            ref={cameraVideoRef}
-            src={cameraVideoPath}
-            className="absolute bottom-4 right-4 border border-black/40 shadow-lg overflow-hidden"
-            muted
-            playsInline
+          <div
+            ref={cameraOverlayRef}
+            className="absolute border border-black/40 shadow-lg overflow-hidden cursor-move"
             style={{
               display: hideCamera ? 'none' : 'block',
-              width: size,
-              maxWidth: maxSize,
-              aspectRatio: isCircle ? '1 / 1' : 'auto',
-              height: isCircle ? size : 'auto',
-              maxHeight: isCircle ? maxSize : 'none',
+              width: fixedSize,
+              height: fixedSize,
+              left: `${positionX}%`,
+              top: `${positionY}%`,
+              transform: 'translate(-50%, -50%)', // Center on position point
               borderRadius,
-              objectFit: 'cover',
+              userSelect: 'none',
+              touchAction: 'none',
             }}
-          />
+            onPointerDown={handleCameraPointerDown}
+            onPointerMove={handleCameraPointerMove}
+            onPointerUp={handleCameraPointerUp}
+            onPointerCancel={handleCameraPointerUp}
+          >
+            <video
+              ref={cameraVideoRef}
+              src={cameraVideoPath}
+              className="w-full h-full"
+              muted
+              playsInline
+              style={{
+                width: '100%',
+                height: '100%',
+                aspectRatio: '1 / 1',
+                borderRadius,
+                objectFit: 'cover',
+                pointerEvents: 'none', // Let parent handle dragging
+              }}
+            />
+          </div>
         );
       })()}
     </div>

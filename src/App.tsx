@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LaunchWindow } from "./components/launch/LaunchWindow";
 import { SourceSelector } from "./components/launch/SourceSelector";
 import { CameraPreview } from "./components/launch/CameraPreview";
+import { CameraWarningDialog } from "./components/launch/CameraWarningDialog";
 import VideoEditor from "./components/video-editor/VideoEditor";
 
 export default function App() {
@@ -11,7 +12,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const type = params.get('windowType') || '';
     setWindowType(type);
-    if (type === 'hud-overlay' || type === 'source-selector' || type === 'camera-preview') {
+    if (type === 'hud-overlay' || type === 'source-selector' || type === 'camera-preview' || type === 'camera-warning-dialog') {
       document.body.style.background = 'transparent';
       document.documentElement.style.background = 'transparent';
       const root = document.getElementById('root');
@@ -31,6 +32,8 @@ export default function App() {
       return <SourceSelector />;
     case 'camera-preview':
       return <CameraPreview />;
+    case 'camera-warning-dialog':
+      return <CameraWarningDialog />;
     case 'editor':
       return <VideoEditor />;
       default:

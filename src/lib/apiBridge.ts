@@ -438,5 +438,21 @@ export const apiBridge = {
     }
     return { success: false, error: 'Not available' };
   },
+
+  // Open camera warning dialog
+  async openCameraWarningDialog(): Promise<{ success: boolean; error?: string }> {
+    if (isElectron() && window.electronAPI?.openCameraWarningDialog) {
+      return await window.electronAPI.openCameraWarningDialog();
+    }
+    return { success: false, error: 'Dialog only available in Electron' };
+  },
+
+  // Wait for camera warning dialog response
+  async waitForCameraWarningDialogResponse(): Promise<'continue' | 'cancel'> {
+    if (isElectron() && window.electronAPI?.waitForCameraWarningDialogResponse) {
+      return await window.electronAPI.waitForCameraWarningDialogResponse();
+    }
+    return 'cancel';
+  },
 };
 

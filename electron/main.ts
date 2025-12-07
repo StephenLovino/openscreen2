@@ -2,7 +2,7 @@ import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
-import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, createCameraPreviewWindow } from './windows'
+import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, createCameraPreviewWindow, createCameraWarningDialogWindow } from './windows'
 import { registerIpcHandlers } from './ipc/handlers'
 
 
@@ -43,6 +43,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 let mainWindow: BrowserWindow | null = null
 let sourceSelectorWindow: BrowserWindow | null = null
 let cameraPreviewWindow: BrowserWindow | null = null
+let cameraWarningDialogWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let selectedSourceName = ''
 
@@ -140,6 +141,26 @@ function closeCameraPreviewWindowWrapper() {
   }
 }
 
+function createCameraWarningDialogWindowWrapper() {
+  if (cameraWarningDialogWindow && !cameraWarningDialogWindow.isDestroyed()) {
+    cameraWarningDialogWindow.show();
+    cameraWarningDialogWindow.focus();
+    return cameraWarningDialogWindow;
+  }
+  cameraWarningDialogWindow = createCameraWarningDialogWindow();
+  cameraWarningDialogWindow.on('closed', () => {
+    cameraWarningDialogWindow = null;
+  });
+  return cameraWarningDialogWindow;
+}
+
+function closeCameraWarningDialogWindowWrapper() {
+  if (cameraWarningDialogWindow && !cameraWarningDialogWindow.isDestroyed()) {
+    cameraWarningDialogWindow.close();
+    cameraWarningDialogWindow = null;
+  }
+}
+
 // On macOS, applications and their menu bar stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
@@ -188,7 +209,10 @@ app.whenReady().then(async () => {
     },
     () => cameraPreviewWindow,
     createCameraPreviewWindowWrapper,
-    closeCameraPreviewWindowWrapper
+    closeCameraPreviewWindowWrapper,
+    createCameraWarningDialogWindowWrapper,
+    closeCameraWarningDialogWindowWrapper,
+    () => cameraWarningDialogWindow
   )
   createWindow()
 })

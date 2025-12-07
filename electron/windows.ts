@@ -168,9 +168,10 @@ export function createCameraPreviewWindow(): BrowserWindow {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
   
   // Create a compact floating window, positioned top-right.
-  // Size is kept close to the preview so there isn't much outer padding.
-  const winWidth = 260;
-  const winHeight = 260;
+  // Size matches editor overlay: 250px preview + ~60px for controls = 310px total
+  // Initial size will be adjusted by the component based on shape/size selection
+  const winWidth = 310;
+  const winHeight = 310;
   const x = Math.round(width - winWidth - 20);
   const y = 20;
   
@@ -179,8 +180,8 @@ export function createCameraPreviewWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: winWidth,
     height: winHeight,
-    minWidth: 220,
-    minHeight: 220,
+    minWidth: 250,
+    minHeight: 250,
     maxWidth: 640,
     maxHeight: 640,
     x: x,
@@ -250,5 +251,43 @@ export function createCameraPreviewWindow(): BrowserWindow {
   }
 
   console.log('🔵 windows.ts: Camera preview window created with ID:', win.id);
+  return win
+}
+
+export function createCameraWarningDialogWindow(): BrowserWindow {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  
+  const win = new BrowserWindow({
+    width: 480,
+    height: 280,
+    minWidth: 400,
+    minHeight: 240,
+    maxWidth: 600,
+    maxHeight: 400,
+    x: Math.round((width - 480) / 2),
+    y: Math.round((height - 280) / 2),
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    transparent: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.mjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  })
+
+  if (VITE_DEV_SERVER_URL) {
+    const baseUrl = VITE_DEV_SERVER_URL.endsWith('/') 
+      ? VITE_DEV_SERVER_URL.slice(0, -1) 
+      : VITE_DEV_SERVER_URL;
+    const url = `${baseUrl}?windowType=camera-warning-dialog`;
+    win.loadURL(url);
+  } else {
+    const query = { windowType: 'camera-warning-dialog' };
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'), { query });
+  }
+
   return win
 }

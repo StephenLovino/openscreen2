@@ -19,7 +19,10 @@ export function registerIpcHandlers(
   onRecordingStateChange?: (recording: boolean, sourceName: string) => void,
   getCameraPreviewWindow?: () => BrowserWindow | null,
   createCameraPreviewWindow?: () => BrowserWindow,
-  closeCameraPreviewWindow?: () => void
+  closeCameraPreviewWindow?: () => void,
+  createCameraWarningDialogWindow?: () => BrowserWindow,
+  closeCameraWarningDialogWindow?: () => void,
+  getCameraWarningDialogWindow?: () => BrowserWindow | null
 ) {
   ipcMain.handle('get-sources', async (_, opts) => {
     const sources = await desktopCapturer.getSources(opts)
@@ -386,5 +389,48 @@ export function registerIpcHandlers(
     currentVideoPath = null;
     currentCameraVideoPath = null;
     return { success: true };
+  });
+
+  // Camera warning dialog handlers
+  // Store pending response callbacks
+  const dialogResponseCallbacks: Array<((action: 'continue' | 'cancel') => void)> = [];
+  
+  ipcMain.handle('open-camera-warning-dialog', () => {
+    if (createCameraWarningDialogWindow) {
+      const win = createCameraWarningDialogWindow();
+      return { success: true };
+    }
+    return { success: false, error: 'Dialog window not available' };
+  });
+
+  ipcMain.handle('close-camera-warning-dialog', () => {
+    if (closeCameraWarningDialogWindow) {
+      closeCameraWarningDialogWindow();
+      return { success: true };
+    }
+    return { success: false };
+  });
+
+  // Listen for dialog response
+  ipcMain.on('camera-warning-dialog-response', (_, data: { action: 'continue' | 'cancel' }) => {
+    // Resolve all pending callbacks
+    dialogResponseCallbacks.forEach(callback => {
+      callback(data.action);
+    });
+    dialogResponseCallbacks.length = 0; // Clear array
+    
+    // Close the dialog window
+    if (closeCameraWarningDialogWindow) {
+      closeCameraWarningDialogWindow();
+    }
+  });
+
+  // Expose a way to wait for dialog response
+  ipcMain.handle('wait-for-camera-warning-dialog-response', (): Promise<'continue' | 'cancel'> => {
+    return new Promise((resolve) => {
+      dialogResponseCallbacks.push((action) => {
+        resolve(action);
+      });
+    });
   });
 }

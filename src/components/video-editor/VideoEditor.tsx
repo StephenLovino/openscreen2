@@ -45,6 +45,8 @@ export default function VideoEditor() {
   const [cropRegion, setCropRegion] = useState<CropRegion>(DEFAULT_CROP_REGION);
   const [hideCamera, setHideCamera] = useState(false);
   const [cameraShape, setCameraShape] = useState<'circle' | 'squircle' | 'square'>('squircle');
+  const [cameraSize, setCameraSize] = useState(250); // Default 250px, range 150-350px
+  const [cameraPosition, setCameraPosition] = useState<{ x: number; y: number }>({ x: 100, y: 100 }); // Position as percentage (0-100), default bottom-right
   const [zoomRegions, setZoomRegions] = useState<ZoomRegion[]>([]);
   const [selectedZoomId, setSelectedZoomId] = useState<string | null>(null);
   const [trimRegions, setTrimRegions] = useState<TrimRegion[]>([]);
@@ -335,6 +337,8 @@ export default function VideoEditor() {
         hideCamera: hideCamera,
         videoUrl: videoPath,
         cameraVideoUrl: cameraVideoPath || undefined,
+        cameraSize: cameraSize,
+        cameraPosition: cameraPosition,
         width: exportWidth,
         height: exportHeight,
         frameRate: 60,
@@ -461,6 +465,9 @@ export default function VideoEditor() {
                       cropRegion={cropRegion}
                       trimRegions={trimRegions}
                       hideCamera={hideCamera}
+                      cameraSize={cameraSize}
+                      cameraPosition={cameraPosition}
+                      onCameraPositionChange={setCameraPosition}
                     />
                   </div>
                 </div>
@@ -544,6 +551,8 @@ export default function VideoEditor() {
               }, 0);
             }
           }}
+          cameraSize={cameraSize}
+          onCameraSizeChange={setCameraSize}
           videoElement={videoPlaybackRef.current?.video || null}
           onExport={handleExport}
         />

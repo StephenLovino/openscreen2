@@ -83,5 +83,20 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   },
   stopMicTrack: () => {
     return electron.ipcRenderer.invoke("stop-mic-track");
+  },
+  openCameraWarningDialog: () => {
+    return electron.ipcRenderer.invoke("open-camera-warning-dialog");
+  },
+  closeCameraWarningDialog: () => {
+    return electron.ipcRenderer.invoke("close-camera-warning-dialog");
+  },
+  waitForCameraWarningDialogResponse: () => {
+    return electron.ipcRenderer.invoke("wait-for-camera-warning-dialog-response");
+  },
+  send: (channel, data) => {
+    electron.ipcRenderer.send(channel, data);
+  },
+  closeWindow: () => {
+    if (window.electronAPI && window.electronAPI.closeWindow) ;
   }
 });

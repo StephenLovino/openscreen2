@@ -87,4 +87,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopMicTrack: () => {
     return ipcRenderer.invoke('stop-mic-track')
   },
+  openCameraWarningDialog: () => {
+    return ipcRenderer.invoke('open-camera-warning-dialog')
+  },
+  closeCameraWarningDialog: () => {
+    return ipcRenderer.invoke('close-camera-warning-dialog')
+  },
+  waitForCameraWarningDialogResponse: () => {
+    return ipcRenderer.invoke('wait-for-camera-warning-dialog-response')
+  },
+  send: (channel: string, data?: any) => {
+    ipcRenderer.send(channel, data)
+  },
+  closeWindow: () => {
+    if (window.electronAPI && (window.electronAPI as any).closeWindow) {
+      // Window will be closed by main process
+    }
+  },
 })

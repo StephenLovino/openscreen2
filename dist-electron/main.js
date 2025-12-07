@@ -132,16 +132,16 @@ function createSourceSelectorWindow(mode) {
 function createCameraPreviewWindow() {
   console.log("🔵 windows.ts: createCameraPreviewWindow called");
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const winWidth = 260;
-  const winHeight = 260;
+  const winWidth = 310;
+  const winHeight = 310;
   const x = Math.round(width - winWidth - 20);
   const y = 20;
   console.log("🔵 windows.ts: Creating camera preview window at", x, y, "size", winWidth, "x", winHeight);
   const win = new BrowserWindow({
     width: winWidth,
     height: winHeight,
-    minWidth: 220,
-    minHeight: 220,
+    minWidth: 250,
+    minHeight: 250,
     maxWidth: 640,
     maxHeight: 640,
     x,
@@ -203,11 +203,43 @@ function createCameraPreviewWindow() {
   console.log("🔵 windows.ts: Camera preview window created with ID:", win.id);
   return win;
 }
+function createCameraWarningDialogWindow() {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const win = new BrowserWindow({
+    width: 480,
+    height: 280,
+    minWidth: 400,
+    minHeight: 240,
+    maxWidth: 600,
+    maxHeight: 400,
+    x: Math.round((width - 480) / 2),
+    y: Math.round((height - 280) / 2),
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    transparent: true,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: path.join(__dirname$2, "preload.mjs"),
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+  if (VITE_DEV_SERVER_URL$1) {
+    const baseUrl = VITE_DEV_SERVER_URL$1.endsWith("/") ? VITE_DEV_SERVER_URL$1.slice(0, -1) : VITE_DEV_SERVER_URL$1;
+    const url = `${baseUrl}?windowType=camera-warning-dialog`;
+    win.loadURL(url);
+  } else {
+    const query = { windowType: "camera-warning-dialog" };
+    win.loadFile(path.join(RENDERER_DIST$1, "index.html"), { query });
+  }
+  return win;
+}
 const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 let selectedSource = null;
 let selectedSources = [];
 let lastGetSourcesLogTime = 0;
-function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, getMainWindow, getSourceSelectorWindow, onRecordingStateChange, getCameraPreviewWindow, createCameraPreviewWindow2, closeCameraPreviewWindow) {
+function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, getMainWindow, getSourceSelectorWindow, onRecordingStateChange, getCameraPreviewWindow, createCameraPreviewWindow2, closeCameraPreviewWindow, createCameraWarningDialogWindow2, closeCameraWarningDialogWindow, getCameraWarningDialogWindow) {
   ipcMain.handle("get-sources", async (_, opts) => {
     const sources = await desktopCapturer.getSources(opts);
     return sources.map((source) => ({
@@ -514,6 +546,37 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
     currentCameraVideoPath = null;
     return { success: true };
   });
+  const dialogResponseCallbacks = [];
+  ipcMain.handle("open-camera-warning-dialog", () => {
+    if (createCameraWarningDialogWindow2) {
+      createCameraWarningDialogWindow2();
+      return { success: true };
+    }
+    return { success: false, error: "Dialog window not available" };
+  });
+  ipcMain.handle("close-camera-warning-dialog", () => {
+    if (closeCameraWarningDialogWindow) {
+      closeCameraWarningDialogWindow();
+      return { success: true };
+    }
+    return { success: false };
+  });
+  ipcMain.on("camera-warning-dialog-response", (_, data) => {
+    dialogResponseCallbacks.forEach((callback) => {
+      callback(data.action);
+    });
+    dialogResponseCallbacks.length = 0;
+    if (closeCameraWarningDialogWindow) {
+      closeCameraWarningDialogWindow();
+    }
+  });
+  ipcMain.handle("wait-for-camera-warning-dialog-response", () => {
+    return new Promise((resolve) => {
+      dialogResponseCallbacks.push((action) => {
+        resolve(action);
+      });
+    });
+  });
 }
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RECORDINGS_DIR = path.join(app.getPath("userData"), "recordings");
@@ -534,6 +597,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 let mainWindow = null;
 let sourceSelectorWindow = null;
 let cameraPreviewWindow = null;
+let cameraWarningDialogWindow = null;
 let tray = null;
 let selectedSourceName = "";
 function createWindow() {
@@ -621,6 +685,24 @@ function closeCameraPreviewWindowWrapper() {
     cameraPreviewWindow = null;
   }
 }
+function createCameraWarningDialogWindowWrapper() {
+  if (cameraWarningDialogWindow && !cameraWarningDialogWindow.isDestroyed()) {
+    cameraWarningDialogWindow.show();
+    cameraWarningDialogWindow.focus();
+    return cameraWarningDialogWindow;
+  }
+  cameraWarningDialogWindow = createCameraWarningDialogWindow();
+  cameraWarningDialogWindow.on("closed", () => {
+    cameraWarningDialogWindow = null;
+  });
+  return cameraWarningDialogWindow;
+}
+function closeCameraWarningDialogWindowWrapper() {
+  if (cameraWarningDialogWindow && !cameraWarningDialogWindow.isDestroyed()) {
+    cameraWarningDialogWindow.close();
+    cameraWarningDialogWindow = null;
+  }
+}
 app.on("window-all-closed", () => {
 });
 app.on("activate", () => {
@@ -656,7 +738,9 @@ app.whenReady().then(async () => {
     },
     () => cameraPreviewWindow,
     createCameraPreviewWindowWrapper,
-    closeCameraPreviewWindowWrapper
+    closeCameraPreviewWindowWrapper,
+    createCameraWarningDialogWindowWrapper,
+    closeCameraWarningDialogWindowWrapper
   );
   createWindow();
 });
