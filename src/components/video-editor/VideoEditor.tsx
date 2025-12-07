@@ -22,7 +22,7 @@ import {
   type TrimRegion,
   type CropRegion,
 } from "./types";
-import { VideoExporter, type ExportProgress } from "@/lib/exporter";
+import { VideoExporter, type ExportProgress, type ExportResult } from "@/lib/exporter";
 import { apiBridge } from "@/lib/apiBridge";
 
 const WALLPAPER_COUNT = 18;
@@ -45,8 +45,9 @@ export default function VideoEditor() {
   const [cropRegion, setCropRegion] = useState<CropRegion>(DEFAULT_CROP_REGION);
   const [hideCamera, setHideCamera] = useState(false);
   const [cameraShape, setCameraShape] = useState<'circle' | 'squircle' | 'square'>('squircle');
-  const [cameraSize, setCameraSize] = useState(250); // Default 250px, range 150-350px
-  const [cameraPosition, setCameraPosition] = useState<{ x: number; y: number }>({ x: 100, y: 100 }); // Position as percentage (0-100), default bottom-right
+  const [cameraSize, setCameraSize] = useState(150); // Default 150px, range 100-350px
+  // Default position: bottom-right with padding (92%, 92% keeps camera fully visible with translate(-50%, -50%))
+  const [cameraPosition, setCameraPosition] = useState<{ x: number; y: number }>({ x: 92, y: 92 });
   const [zoomRegions, setZoomRegions] = useState<ZoomRegion[]>([]);
   const [selectedZoomId, setSelectedZoomId] = useState<string | null>(null);
   const [trimRegions, setTrimRegions] = useState<TrimRegion[]>([]);
@@ -55,6 +56,8 @@ export default function VideoEditor() {
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportResolution, setExportResolution] = useState<'480p' | '720p' | '1080p' | '2k' | '4k'>('1080p');
+  const [exportFormat, setExportFormat] = useState<'mp4' | 'gif'>('mp4');
 
   const videoPlaybackRef = useRef<VideoPlaybackRef>(null);
   const nextZoomIdRef = useRef(1);
@@ -91,6 +94,104 @@ export default function VideoEditor() {
       console.warn('Failed to load camera shape from sessionStorage:', e);
     }
   }, []);
+  
+  // Load auto-zoom events after video is loaded (so we know the duration)
+  useEffect(() => {
+    console.log('🔵 VideoEditor: Checking for auto-zoom events, duration:', duration);
+    
+    if (!duration || duration === 0) {
+      console.log('🔵 VideoEditor: Duration not available yet, skipping auto-zoom load');
+      return; // Wait for video to load
+    }
+    
+    try {
+      const eventsStr = localStorage.getItem('autoZoomEvents');
+      console.log('🔵 VideoEditor: Found autoZoomEvents in localStorage:', eventsStr ? 'yes' : 'no');
+      
+      if (eventsStr) {
+        const events = JSON.parse(eventsStr);
+        console.log('🔵 VideoEditor: Parsed events:', events);
+        
+        if (Array.isArray(events) && events.length > 0) {
+          console.log('🔵 VideoEditor: Loading auto-zoom events:', events.length, 'Video duration:', duration);
+          
+          const videoDurationMs = Math.round(duration * 1000);
+          const DEFAULT_ZOOM_DURATION = 2000; // 2 seconds
+          
+          // Sort events by timestamp to ensure proper ordering
+          const sortedEvents = [...events].sort((a: any, b: any) => a.timestamp - b.timestamp);
+          console.log('🔵 VideoEditor: Sorted events by timestamp:', sortedEvents);
+          
+          // Minimum gap between zoom regions to prevent overlap (in milliseconds)
+          const MIN_ZOOM_GAP_MS = 500; // 0.5 seconds minimum gap
+          
+          // Convert events to zoom regions, filtering out invalid ones and preventing overlaps
+          const autoZoomRegions: ZoomRegion[] = [];
+          let lastZoomEndMs = -MIN_ZOOM_GAP_MS;
+          
+          sortedEvents.forEach((event: any, index: number) => {
+            // Validate timestamp is within video bounds
+            const startMs = event.timestamp;
+            const endMs = event.timestamp + DEFAULT_ZOOM_DURATION;
+            
+            // Skip if too close to previous zoom
+            if (startMs < lastZoomEndMs + MIN_ZOOM_GAP_MS) {
+              console.warn(`🔵 VideoEditor: Skipping auto-zoom event ${index + 1} - too close to previous zoom (${startMs}ms < ${lastZoomEndMs + MIN_ZOOM_GAP_MS}ms)`);
+              return;
+            }
+            
+            const isValid = startMs >= 0 && startMs < videoDurationMs && endMs <= videoDurationMs;
+            if (!isValid) {
+              console.warn('🔵 VideoEditor: Skipping invalid auto-zoom event:', event, 'videoDurationMs:', videoDurationMs);
+              return;
+            }
+            
+            // Use nextZoomIdRef to ensure unique IDs that don't conflict with manual zooms
+            const id = `zoom-auto-${nextZoomIdRef.current++}`;
+            const region: ZoomRegion = {
+              id,
+              startMs: event.timestamp,
+              endMs: Math.min(event.timestamp + DEFAULT_ZOOM_DURATION, videoDurationMs),
+              depth: 3 as const, // Default zoom depth
+              focus: {
+                cx: Math.max(0, Math.min(1, event.x)), // Clamp to 0-1
+                cy: Math.max(0, Math.min(1, event.y)), // Clamp to 0-1
+              },
+            };
+            console.log(`🔵 VideoEditor: Created zoom region ${autoZoomRegions.length + 1}/${sortedEvents.length} from event:`, region);
+            autoZoomRegions.push(region);
+            lastZoomEndMs = region.endMs;
+          });
+          
+          console.log('🔵 VideoEditor: Created', autoZoomRegions.length, 'valid auto-zoom regions from', events.length, 'events');
+          
+          if (autoZoomRegions.length > 0) {
+            console.log('🔵 VideoEditor: Adding', autoZoomRegions.length, 'auto-zoom regions to timeline');
+            // Merge with existing zoom regions (if any)
+            setZoomRegions(prev => {
+              // Avoid duplicates by checking IDs
+              const existingIds = new Set(prev.map(r => r.id));
+              const newRegions = autoZoomRegions.filter(r => !existingIds.has(r.id));
+              console.log('🔵 VideoEditor: Merging', newRegions.length, 'new regions with', prev.length, 'existing regions');
+              return [...prev, ...newRegions];
+            });
+          } else {
+            console.warn('🔵 VideoEditor: No valid auto-zoom regions created from events');
+          }
+          
+          // Clear auto-zoom events after loading
+          localStorage.removeItem('autoZoomEvents');
+          console.log('🔵 VideoEditor: Cleared autoZoomEvents from localStorage');
+        } else {
+          console.log('🔵 VideoEditor: Events array is empty or not an array');
+        }
+      } else {
+        console.log('🔵 VideoEditor: No autoZoomEvents found in localStorage');
+      }
+    } catch (e) {
+      console.error('🔵 VideoEditor: Failed to load auto-zoom events from sessionStorage:', e);
+    }
+  }, [duration]); // Load when duration is available
 
   useEffect(() => {
     async function loadVideo() {
@@ -275,6 +376,24 @@ export default function VideoEditor() {
     }
   }, [selectedTrimId, trimRegions]);
 
+  // Helper function to get resolution dimensions
+  const getResolutionDimensions = (resolution: '480p' | '720p' | '1080p' | '2k' | '4k'): { width: number; height: number } => {
+    switch (resolution) {
+      case '480p':
+        return { width: 854, height: 480 };
+      case '720p':
+        return { width: 1280, height: 720 };
+      case '1080p':
+        return { width: 1920, height: 1080 };
+      case '2k':
+        return { width: 2560, height: 1440 };
+      case '4k':
+        return { width: 3840, height: 2160 };
+      default:
+        return { width: 1920, height: 1080 };
+    }
+  };
+
   const handleExport = useCallback(async () => {
     if (!videoPath) {
       toast.error('No video loaded');
@@ -307,20 +426,25 @@ export default function VideoEditor() {
       
       const sourceWidth = video.videoWidth || 1920;
       const sourceHeight = video.videoHeight || 1080;
-      const targetAspectRatio = 16 / 9;
       const sourceAspectRatio = sourceWidth / sourceHeight;
+      
+      // Get target resolution dimensions
+      const targetRes = getResolutionDimensions(exportResolution);
+      const targetAspectRatio = targetRes.width / targetRes.height;
       
       let exportWidth: number;
       let exportHeight: number;
       
+      // Scale to target resolution while maintaining aspect ratio
       if (sourceAspectRatio > targetAspectRatio) {
-        exportHeight = sourceHeight;
-        exportWidth = Math.round(exportHeight * targetAspectRatio);
+        exportHeight = targetRes.height;
+        exportWidth = Math.round(exportHeight * sourceAspectRatio);
       } else {
-        exportWidth = sourceWidth;
-        exportHeight = Math.round(exportWidth / targetAspectRatio);
+        exportWidth = targetRes.width;
+        exportHeight = Math.round(exportWidth / sourceAspectRatio);
       }
       
+      // Ensure even dimensions for video encoding
       exportWidth = Math.round(exportWidth / 2) * 2;
       exportHeight = Math.round(exportHeight / 2) * 2;
 
@@ -333,49 +457,85 @@ export default function VideoEditor() {
         bitrate = 80_000_000;
       }
 
-      const exporter = new VideoExporter({
-        hideCamera: hideCamera,
-        videoUrl: videoPath,
-        cameraVideoUrl: cameraVideoPath || undefined,
-        cameraSize: cameraSize,
-        cameraPosition: cameraPosition,
-        width: exportWidth,
-        height: exportHeight,
-        frameRate: 60,
-        bitrate,
-        codec: 'avc1.640033',
-        wallpaper,
-        zoomRegions,
-        trimRegions,
-        showShadow: shadowIntensity > 0,
-        shadowIntensity,
-        showBlur,
-        motionBlurEnabled,
-        borderRadius,
-        padding,
-        cropRegion,
-        onProgress: (progress: ExportProgress) => {
-          setExportProgress(progress);
-        },
-      });
+      let result: ExportResult;
+      let fileName: string;
+      const timestamp = Date.now();
 
-      exporterRef.current = exporter;
-      const result = await exporter.export();
+      if (exportFormat === 'gif') {
+        // Use GIF exporter
+        const { GifExporter } = await import('@/lib/exporter/gifExporter');
+        const gifExporter = new GifExporter({
+          hideCamera: hideCamera,
+          videoUrl: videoPath,
+          cameraVideoUrl: cameraVideoPath || undefined,
+          cameraSize: cameraSize,
+          cameraPosition: cameraPosition,
+          width: exportWidth,
+          height: exportHeight,
+          frameRate: 30, // GIFs typically use lower frame rate
+          wallpaper,
+          zoomRegions,
+          trimRegions,
+          showShadow: shadowIntensity > 0,
+          shadowIntensity,
+          showBlur,
+          motionBlurEnabled,
+          borderRadius,
+          padding,
+          cropRegion,
+          onProgress: (progress: ExportProgress) => {
+            setExportProgress(progress);
+          },
+        });
+
+        exporterRef.current = gifExporter as any;
+        result = await gifExporter.export();
+        fileName = `export-${timestamp}.gif`;
+      } else {
+        // Use video exporter
+        const exporter = new VideoExporter({
+          hideCamera: hideCamera,
+          videoUrl: videoPath,
+          cameraVideoUrl: cameraVideoPath || undefined,
+          cameraSize: cameraSize,
+          cameraPosition: cameraPosition,
+          width: exportWidth,
+          height: exportHeight,
+          frameRate: 60,
+          bitrate,
+          codec: 'avc1.640033',
+          wallpaper,
+          zoomRegions,
+          trimRegions,
+          showShadow: shadowIntensity > 0,
+          shadowIntensity,
+          showBlur,
+          motionBlurEnabled,
+          borderRadius,
+          padding,
+          cropRegion,
+          onProgress: (progress: ExportProgress) => {
+            setExportProgress(progress);
+          },
+        });
+
+        exporterRef.current = exporter;
+        result = await exporter.export();
+        fileName = `export-${timestamp}.mp4`;
+      }
 
       if (result.success && result.blob) {
         const arrayBuffer = await result.blob.arrayBuffer();
-        const timestamp = Date.now();
-        const fileName = `export-${timestamp}.mp4`;
         
         const saveResult = await apiBridge.saveExportedVideo(arrayBuffer, fileName);
         
         if (saveResult.cancelled) {
           toast.info('Export cancelled');
         } else if (saveResult.success) {
-          toast.success(`Video exported successfully to ${saveResult.path}`);
+          toast.success(`${exportFormat === 'gif' ? 'GIF' : 'Video'} exported successfully to ${saveResult.path}`);
         } else {
-          setExportError(saveResult.message || 'Failed to save video');
-          toast.error(saveResult.message || 'Failed to save video');
+          setExportError(`Failed to save ${exportFormat === 'gif' ? 'GIF' : 'video'}`);
+          toast.error(`Failed to save ${exportFormat === 'gif' ? 'GIF' : 'video'}`);
         }
       } else {
         setExportError(result.error || 'Export failed');
@@ -394,7 +554,7 @@ export default function VideoEditor() {
       setIsExporting(false);
       exporterRef.current = null;
     }
-  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, isPlaying]);
+  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, isPlaying, exportResolution, exportFormat, hideCamera, cameraSize, cameraPosition]);
 
   const handleCancelExport = useCallback(() => {
     if (exporterRef.current) {
@@ -424,7 +584,7 @@ export default function VideoEditor() {
 
 
   return (
-    <div className="flex flex-col h-screen bg-[#09090b] text-slate-200 overflow-hidden selection:bg-[#34B27B]/30">
+    <div className="flex flex-col h-screen bg-[#09090b] text-slate-200 overflow-hidden selection:bg-[#DA1F26]/30">
       <div 
         className="h-10 flex-shrink-0 bg-[#09090b]/80 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-6 z-50"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
@@ -555,6 +715,10 @@ export default function VideoEditor() {
           onCameraSizeChange={setCameraSize}
           videoElement={videoPlaybackRef.current?.video || null}
           onExport={handleExport}
+          exportResolution={exportResolution}
+          onExportResolutionChange={setExportResolution}
+          exportFormat={exportFormat}
+          onExportFormatChange={setExportFormat}
         />
       </div>
 

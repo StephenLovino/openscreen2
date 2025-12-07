@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button";
-import { Circle, Square, RectangleHorizontal, X, Maximize2, Minimize2, VideoOff, MicOff } from "lucide-react";
+import { Circle, Square, RectangleHorizontal, X, Maximize2, Minimize2 } from "lucide-react";
 import styles from "./LaunchWindow.module.css";
-import { stopCameraTrack, stopMicTrack } from "../../hooks/useScreenRecorder";
 import { apiBridge } from "../../lib/apiBridge";
 
 type PreviewShape = 'circle' | 'squircle' | 'square';
@@ -14,9 +13,6 @@ export function CameraPreview() {
   const [shape, setShape] = useState<PreviewShape>('squircle');
   const [size, setSize] = useState<'sm' | 'lg'>('sm');
   const [showControls, setShowControls] = useState(false);
-  const [showDeviceControls, setShowDeviceControls] = useState(false);
-  const [cameraEnabled, setCameraEnabled] = useState(true);
-  const [micEnabled, setMicEnabled] = useState(true);
 
   useEffect(() => {
     // Initialize camera shape from sessionStorage if available
@@ -87,8 +83,6 @@ export function CameraPreview() {
         });
 
         streamRef.current = stream;
-        setCameraEnabled(true);
-        setMicEnabled(stream.getAudioTracks().length > 0);
         
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -133,12 +127,10 @@ export function CameraPreview() {
     }
   };
 
-  // Resize window when size changes (add extra height for controls)
+  // Resize window when size changes
   useEffect(() => {
     if (window.electronAPI?.resizeWindow) {
-      // Add ~60px for controls below preview
-      const controlsHeight = 60;
-      window.electronAPI.resizeWindow(previewSize, previewSize + controlsHeight);
+      window.electronAPI.resizeWindow(previewSize, previewSize);
     }
   }, [previewSize]);
 
@@ -169,43 +161,18 @@ export function CameraPreview() {
     });
   };
 
-  const handleStopCamera = async () => {
-    if (cameraEnabled) {
-      stopCameraTrack();
-      setCameraEnabled(false);
-      await apiBridge.closeCameraPreview();
-    } else {
-      // Re-enable camera - reopen preview
-      setCameraEnabled(true);
-      await apiBridge.openCameraPreview();
-    }
-  };
-
-  const handleStopMic = () => {
-    if (micEnabled) {
-      stopMicTrack();
-      setMicEnabled(false);
-    } else {
-      // Re-enable mic
-      setMicEnabled(true);
-      // Note: Re-enabling mic during recording would require restarting the stream
-    }
-  };
-
-
   return (
     <div 
       ref={containerRef}
-      className="bg-transparent flex flex-col items-center justify-start relative group"
+      className="flex flex-col items-center justify-start relative group"
       style={{ 
         WebkitAppRegion: 'drag', // Make draggable in Electron
         userSelect: 'none',
         width: `${previewSize}px`,
         minWidth: `${previewSize}px`,
         maxWidth: `${previewSize}px`,
+        background: 'transparent',
       }}
-      onMouseEnter={() => setShowDeviceControls(true)}
-      onMouseLeave={() => setShowDeviceControls(false)}
     >
       <div
         className="relative flex-shrink-0"
@@ -247,7 +214,7 @@ export function CameraPreview() {
         {/* Controls overlay */}
         <div
           data-controls
-          className={`absolute top-2 left-1/2 -translate-x-1/2 flex gap-1 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 transition-opacity ${
+          className={`absolute top-2 left-1/2 -translate-x-1/2 flex gap-1 px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-700 transition-opacity ${
             showControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
           style={{ WebkitAppRegion: 'no-drag' }} // Prevent dragging when clicking controls
@@ -284,45 +251,6 @@ export function CameraPreview() {
             {shape === 'square' && <RectangleHorizontal className="h-3.5 w-3.5" />}
           </Button>
         </div>
-      </div>
-
-      {/* Camera/Mic controls below preview */}
-      <div
-        className={`flex items-center gap-2 mt-2 px-2 py-1.5 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 transition-opacity duration-200 ${
-          showDeviceControls ? 'opacity-100' : 'opacity-0'
-        }`}
-        style={{ WebkitAppRegion: 'no-drag' }}
-        onMouseEnter={() => setShowDeviceControls(true)}
-        onMouseLeave={() => setShowDeviceControls(false)}
-      >
-        <Button
-          variant="ghost"
-          size="sm"
-          className={`h-7 px-3 text-xs gap-1.5 ${
-            cameraEnabled 
-              ? 'text-white hover:text-red-400 hover:bg-red-500/20' 
-              : 'text-red-400/50 hover:text-red-400 hover:bg-red-500/10'
-          }`}
-          onClick={handleStopCamera}
-          title={cameraEnabled ? "Stop camera" : "Enable camera"}
-        >
-          <VideoOff className="h-3.5 w-3.5" />
-          <span>{cameraEnabled ? 'Camera On' : 'Camera Off'}</span>
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className={`h-7 px-3 text-xs gap-1.5 ${
-            micEnabled 
-              ? 'text-white hover:text-red-400 hover:bg-red-500/20' 
-              : 'text-red-400/50 hover:text-red-400 hover:bg-red-500/10'
-          }`}
-          onClick={handleStopMic}
-          title={micEnabled ? "Stop microphone" : "Enable microphone"}
-        >
-          <MicOff className="h-3.5 w-3.5" />
-          <span>{micEnabled ? 'Mic On' : 'Mic Off'}</span>
-        </Button>
       </div>
     </div>
   );

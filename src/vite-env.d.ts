@@ -35,7 +35,9 @@ interface Window {
       error?: string
     }>
     getAssetBasePath: () => Promise<string | null>
-    setRecordingState: (recording: boolean) => Promise<void>
+    setRecordingState: (recording: boolean, autoZoomEnabled?: boolean) => Promise<void>
+    on?: (channel: string, callback: (event: any, ...args: any[]) => void) => void
+    off?: (channel: string, callback: (event: any, ...args: any[]) => void) => void
     onStopRecordingFromTray: (callback: () => void) => () => void
     openExternalUrl: (url: string) => Promise<{ success: boolean; error?: string }>
     saveExportedVideo: (videoData: ArrayBuffer, fileName: string) => Promise<{
@@ -61,7 +63,5 @@ interface Window {
     waitForCameraWarningDialogResponse?: () => Promise<'continue' | 'cancel'>
     send?: (channel: string, data?: any) => void
     closeWindow?: () => void
-    on?: (channel: string, callback: () => void) => void
-    off?: (channel: string, callback: () => void) => void
   }
 }

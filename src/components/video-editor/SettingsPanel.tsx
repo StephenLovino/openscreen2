@@ -72,6 +72,10 @@ interface SettingsPanelProps {
   onCameraSizeChange?: (size: number) => void;
   videoElement?: HTMLVideoElement | null;
   onExport?: () => void;
+  exportResolution?: '480p' | '720p' | '1080p' | '2k' | '4k';
+  onExportResolutionChange?: (resolution: '480p' | '720p' | '1080p' | '2k' | '4k') => void;
+  exportFormat?: 'mp4' | 'gif';
+  onExportFormatChange?: (format: 'mp4' | 'gif') => void;
 }
 
 export default SettingsPanel;
@@ -85,7 +89,7 @@ const ZOOM_DEPTH_OPTIONS: Array<{ depth: ZoomDepth; label: string }> = [
   { depth: 6, label: "5×" },
 ];
 
-export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, onZoomDepthChange, selectedZoomId, onZoomDelete, shadowIntensity = 0, onShadowChange, showBlur, onBlurChange, motionBlurEnabled = true, onMotionBlurChange, borderRadius = 0, onBorderRadiusChange, padding = 50, onPaddingChange, cropRegion, onCropChange, hideCamera = false, onHideCameraChange, cameraShape = 'squircle', onCameraShapeChange, cameraSize = 250, onCameraSizeChange, videoElement, onExport }: SettingsPanelProps) {
+export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, onZoomDepthChange, selectedZoomId, onZoomDelete, shadowIntensity = 0, onShadowChange, showBlur, onBlurChange, motionBlurEnabled = true, onMotionBlurChange, borderRadius = 0, onBorderRadiusChange, padding = 50, onPaddingChange, cropRegion, onCropChange, hideCamera = false, onHideCameraChange, cameraShape = 'squircle', onCameraShapeChange, cameraSize = 150, onCameraSizeChange, videoElement, onExport, exportResolution = '1080p', onExportResolutionChange, exportFormat = 'mp4', onExportFormatChange }: SettingsPanelProps) {
   const [wallpaperPaths, setWallpaperPaths] = useState<string[]>([]);
   const [customImages, setCustomImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -168,7 +172,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
           <span className="text-sm font-medium text-slate-200">Zoom Level</span>
           <div className="flex items-center gap-3">
             {zoomEnabled && selectedZoomDepth && (
-              <span className="text-[10px] uppercase tracking-wider font-medium text-[#34B27B] bg-[#34B27B]/10 px-2 py-1 rounded-full">
+              <span className="text-[10px] uppercase tracking-wider font-medium text-[#DA1F26] bg-[#DA1F26]/10 px-2 py-1 rounded-full">
                 {ZOOM_DEPTH_OPTIONS.find(o => o.depth === selectedZoomDepth)?.label} Active
               </span>
             )}
@@ -189,7 +193,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
                   "duration-200 ease-out",
                   zoomEnabled ? "opacity-100 cursor-pointer" : "opacity-40 cursor-not-allowed",
                   isActive
-                    ? "border-[#34B27B] bg-[#34B27B] text-white shadow-[#34B27B]/20 scale-105 ring-2 ring-[#34B27B]/20"
+                    ? "border-[#DA1F26] bg-[#DA1F26] text-white shadow-[#DA1F26]/20 scale-105 ring-2 ring-[#DA1F26]/20"
                     : "border-white/5 bg-white/5 text-slate-400 hover:bg-white/10 hover:border-white/10 hover:text-slate-200"
                 )}
               >
@@ -222,7 +226,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
             <Switch
               checked={motionBlurEnabled}
               onCheckedChange={onMotionBlurChange}
-              className="data-[state=checked]:bg-[#34B27B]"
+              className="data-[state=checked]:bg-[#DA1F26]"
             />
           </div>
           {/* Blur Background Switch */}
@@ -231,7 +235,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
             <Switch
               checked={showBlur}
               onCheckedChange={onBlurChange}
-              className="data-[state=checked]:bg-[#34B27B]"
+              className="data-[state=checked]:bg-[#DA1F26]"
             />
           </div>
         </div>
@@ -251,7 +255,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
               min={0}
               max={1}
               step={0.01}
-              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+              className="w-full [&_[role=slider]]:bg-[#DA1F26] [&_[role=slider]]:border-[#DA1F26]"
             />
           </div>
           {/* Corner Roundness Slider */}
@@ -266,7 +270,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
               min={0}
               max={16}
               step={0.5}
-              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+              className="w-full [&_[role=slider]]:bg-[#DA1F26] [&_[role=slider]]:border-[#DA1F26]"
             />
           </div>
           {/* Padding Slider */}
@@ -281,7 +285,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
               min={0}
               max={100}
               step={1}
-              className="w-full [&_[role=slider]]:bg-[#34B27B] [&_[role=slider]]:border-[#34B27B]"
+              className="w-full [&_[role=slider]]:bg-[#DA1F26] [&_[role=slider]]:border-[#DA1F26]"
             />
           </div>
         </div>
@@ -294,7 +298,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
             <Switch
               checked={hideCamera}
               onCheckedChange={onHideCameraChange}
-              className="data-[state=checked]:bg-[#34B27B]"
+              className="data-[state=checked]:bg-[#DA1F26]"
             />
           </div>
           {hideCamera && (
@@ -325,7 +329,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
               className={cn(
                 "h-auto w-full rounded-xl border px-3 py-3 text-center shadow-sm transition-all flex flex-col items-center justify-center gap-1.5",
                 cameraShape === 'circle'
-                  ? "border-[#34B27B] bg-[#34B27B] text-white shadow-[#34B27B]/20 scale-105 ring-2 ring-[#34B27B]/20"
+                  ? "border-[#DA1F26] bg-[#DA1F26] text-white shadow-[#DA1F26]/20 scale-105 ring-2 ring-[#DA1F26]/20"
                   : "border-white/5 bg-white/5 text-slate-400 hover:bg-white/10 hover:border-white/10 hover:text-slate-200"
               )}
             >
@@ -348,7 +352,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
               className={cn(
                 "h-auto w-full rounded-xl border px-3 py-3 text-center shadow-sm transition-all flex flex-col items-center justify-center gap-1.5",
                 cameraShape === 'squircle'
-                  ? "border-[#34B27B] bg-[#34B27B] text-white shadow-[#34B27B]/20 scale-105 ring-2 ring-[#34B27B]/20"
+                  ? "border-[#DA1F26] bg-[#DA1F26] text-white shadow-[#DA1F26]/20 scale-105 ring-2 ring-[#DA1F26]/20"
                   : "border-white/5 bg-white/5 text-slate-400 hover:bg-white/10 hover:border-white/10 hover:text-slate-200"
               )}
             >
@@ -371,7 +375,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
               className={cn(
                 "h-auto w-full rounded-xl border px-3 py-3 text-center shadow-sm transition-all flex flex-col items-center justify-center gap-1.5",
                 cameraShape === 'square'
-                  ? "border-[#34B27B] bg-[#34B27B] text-white shadow-[#34B27B]/20 scale-105 ring-2 ring-[#34B27B]/20"
+                  ? "border-[#DA1F26] bg-[#DA1F26] text-white shadow-[#DA1F26]/20 scale-105 ring-2 ring-[#DA1F26]/20"
                   : "border-white/5 bg-white/5 text-slate-400 hover:bg-white/10 hover:border-white/10 hover:text-slate-200"
               )}
             >
@@ -391,13 +395,13 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
           <Slider
             value={[cameraSize]}
             onValueChange={(value) => onCameraSizeChange(value[0])}
-            min={150}
+            min={100}
             max={350}
             step={10}
             className="w-full"
           />
           <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-            <span>150px</span>
+            <span>100px</span>
             <span>350px</span>
           </div>
         </div>
@@ -447,7 +451,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
               <Button
                 onClick={() => setShowCropDropdown(false)}
                 size="lg"
-                className="bg-[#34B27B] hover:bg-[#34B27B]/90 text-white"
+                className="bg-[#DA1F26] hover:bg-[#DA1F26]/90 text-white"
               >
                 Done
               </Button>
@@ -456,14 +460,14 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
         </>
       )}
 
-      <Tabs defaultValue="image" className="flex-1 flex flex-col min-h-0">
+      <Tabs defaultValue="image" className="flex flex-col">
         <TabsList className="mb-4 bg-white/5 border border-white/5 p-1 w-full grid grid-cols-3 h-auto rounded-xl">
-          <TabsTrigger value="image" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Image</TabsTrigger>
-          <TabsTrigger value="color" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Color</TabsTrigger>
-          <TabsTrigger value="gradient" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Gradient</TabsTrigger>
+          <TabsTrigger value="image" className="data-[state=active]:bg-[#DA1F26] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Image</TabsTrigger>
+          <TabsTrigger value="color" className="data-[state=active]:bg-[#DA1F26] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Color</TabsTrigger>
+          <TabsTrigger value="gradient" className="data-[state=active]:bg-[#DA1F26] data-[state=active]:text-white text-slate-400 py-2 rounded-lg transition-all">Gradient</TabsTrigger>
         </TabsList>
         
-        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-2">
+        <div className="overflow-y-auto custom-scrollbar pr-2 max-h-[200px]">
           <TabsContent value="image" className="mt-0 space-y-3">
             {/* Upload Button */}
             <input
@@ -476,7 +480,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
             <Button
               onClick={() => fileInputRef.current?.click()}
               variant="outline"
-              className="w-full gap-2 bg-white/5 text-slate-200 border-white/10 hover:bg-[#34B27B] hover:text-white hover:border-[#34B27B] transition-all"
+              className="w-full gap-2 bg-white/5 text-slate-200 border-white/10 hover:bg-[#DA1F26] hover:text-white hover:border-[#DA1F26] transition-all"
             >
               <Upload className="w-4 h-4" />
               Upload Custom Image
@@ -492,8 +496,8 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
                     className={cn(
                       "aspect-square w-12 h-12 rounded-md border-2 overflow-hidden cursor-pointer transition-all duration-200 relative group shadow-sm",
                       isSelected
-                        ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 scale-105 shadow-lg shadow-[#34B27B]/10"
-                        : "border-white/10 hover:border-[#34B27B]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
+                        ? "border-[#DA1F26] ring-2 ring-[#DA1F26]/30 scale-105 shadow-lg shadow-[#DA1F26]/10"
+                        : "border-white/10 hover:border-[#DA1F26]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
                     )}
                     style={{ backgroundImage: `url(${imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" }}
                     aria-label={`Custom Image ${idx + 1}`}
@@ -529,8 +533,8 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
                     className={cn(
                       "aspect-square w-12 h-12 rounded-md border-2 overflow-hidden cursor-pointer transition-all duration-200 shadow-sm",
                       isSelected
-                        ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 scale-105 shadow-lg shadow-[#34B27B]/10"
-                        : "border-white/10 hover:border-[#34B27B]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
+                        ? "border-[#DA1F26] ring-2 ring-[#DA1F26]/30 scale-105 shadow-lg shadow-[#DA1F26]/10"
+                        : "border-white/10 hover:border-[#DA1F26]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
                     )}
                     style={{ backgroundImage: `url(${path})`, backgroundSize: "cover", backgroundPosition: "center" }}
                     aria-label={`Wallpaper ${idx + 1}`}
@@ -564,8 +568,8 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
                   className={cn(
                     "aspect-square w-12 h-12 rounded-md border-2 overflow-hidden cursor-pointer transition-all duration-200 shadow-sm",
                     gradient === g 
-                      ? "border-[#34B27B] ring-2 ring-[#34B27B]/30 scale-105 shadow-lg shadow-[#34B27B]/10" 
-                      : "border-white/10 hover:border-[#34B27B]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
+                      ? "border-[#DA1F26] ring-2 ring-[#DA1F26]/30 scale-105 shadow-lg shadow-[#DA1F26]/10" 
+                      : "border-white/10 hover:border-[#DA1F26]/40 hover:scale-105 opacity-80 hover:opacity-100 bg-white/5"
                   )}
                   style={{ background: g }}
                   aria-label={`Gradient ${idx + 1}`}
@@ -578,15 +582,72 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
         </div>
       </Tabs>
 
-      <div className="mt-6 pt-6 border-t border-white/5">
+      <div className="mt-6 pt-6 border-t border-white/5 space-y-4">
+        {/* Export Resolution */}
+        {onExportResolutionChange && (
+          <div className="mb-4">
+            <div className="text-xs font-medium text-slate-200 mb-3">Export Resolution</div>
+            <div className="grid grid-cols-5 gap-2">
+              {(['480p', '720p', '1080p', '2k', '4k'] as const).map((res) => (
+                <Button
+                  key={res}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onExportResolutionChange(res)}
+                  className={`flex-1 text-xs ${
+                    exportResolution === res
+                      ? "border-[#DA1F26] bg-[#DA1F26] text-white shadow-[#DA1F26]/20 scale-105 ring-2 ring-[#DA1F26]/20"
+                      : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"
+                  }`}
+                >
+                  {res}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Export Format */}
+        {onExportFormatChange && (
+          <div className="mb-4">
+            <div className="text-xs font-medium text-slate-200 mb-3">Export Format</div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onExportFormatChange('mp4')}
+                className={`flex-1 ${
+                  exportFormat === 'mp4'
+                    ? "border-[#DA1F26] bg-[#DA1F26] text-white shadow-[#DA1F26]/20 scale-105 ring-2 ring-[#DA1F26]/20"
+                    : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"
+                }`}
+              >
+                MP4
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onExportFormatChange('gif')}
+                className={`flex-1 ${
+                  exportFormat === 'gif'
+                    ? "border-[#DA1F26] bg-[#DA1F26] text-white shadow-[#DA1F26]/20 scale-105 ring-2 ring-[#DA1F26]/20"
+                    : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"
+                }`}
+              >
+                GIF
+              </Button>
+            </div>
+          </div>
+        )}
+
         <Button
           type="button"
           size="lg"
           onClick={onExport}
-          className="w-full py-6 text-lg font-semibold flex items-center justify-center gap-3 bg-[#34B27B] text-white rounded-xl shadow-lg shadow-[#34B27B]/20 hover:bg-[#34B27B]/90 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
+          className="w-full py-6 text-lg font-semibold flex items-center justify-center gap-3 bg-[#DA1F26] text-white rounded-xl shadow-lg shadow-[#DA1F26]/20 hover:bg-[#DA1F26]/90 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
         >
           <Download className="w-5 h-5" />
-          <span>Export Video</span>
+          <span>Export {exportFormat === 'gif' ? 'GIF' : 'Video'}</span>
         </Button>
         <div className="flex gap-2 mt-4">
           <button
@@ -596,7 +657,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
             }}
             className="flex-1 flex items-center justify-center gap-2 text-xs py-2"
           >
-            <Bug className="w-3 h-3 text-[#34B27B]" />
+            <Bug className="w-3 h-3 text-[#DA1F26]" />
             <span>Report a Bug</span>
           </button>
           <button

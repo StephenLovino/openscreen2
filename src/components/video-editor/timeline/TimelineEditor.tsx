@@ -168,7 +168,7 @@ function PlaybackCursor({
       }}
     >
       <div
-        className="absolute top-0 bottom-0 w-[2px] bg-[#34B27B] shadow-[0_0_10px_rgba(52,178,123,0.5)]"
+        className="absolute top-0 bottom-0 w-[2px] bg-[#DA1F26] shadow-[0_0_10px_rgba(218,31,38,0.5)]"
         style={{
           [sideProperty]: `${offset}px`,
         }}
@@ -177,7 +177,7 @@ function PlaybackCursor({
           className="absolute -top-1 left-1/2 -translate-x-1/2"
           style={{ width: '12px', height: '12px' }}
         >
-          <div className="w-full h-full bg-[#34B27B] rotate-45 rounded-sm shadow-lg border border-white/20" />
+          <div className="w-full h-full bg-[#DA1F26] rotate-45 rounded-sm shadow-lg border border-white/20" />
         </div>
       </div>
     </div>
@@ -288,7 +288,7 @@ function TimelineAxis({
               <span
                 className={cn(
                   "text-[10px] font-medium tabular-nums tracking-tight",
-                  marker.time === currentTimeMs ? "text-[#34B27B]" : "text-slate-500"
+                  marker.time === currentTimeMs ? "text-[#DA1F26]" : "text-slate-500"
                 )}
               >
                 {marker.label}
@@ -668,7 +668,7 @@ export default function TimelineEditor({
             onClick={handleAddZoom}
             variant="ghost"
             size="icon"
-            className="h-7 w-7 text-slate-400 hover:text-[#34B27B] hover:bg-[#34B27B]/10 transition-all"
+            className="h-7 w-7 text-slate-400 hover:text-[#DA1F26] hover:bg-[#DA1F26]/10 transition-all"
             title="Add Zoom (Z)"
           >
             <ZoomIn className="w-4 h-4" />
@@ -686,11 +686,11 @@ export default function TimelineEditor({
         <div className="flex-1" />
         <div className="flex items-center gap-4 text-[10px] text-slate-500 font-medium">
           <span className="flex items-center gap-1.5">
-            <kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-[#34B27B] font-sans">⇧ + ⌘ + Scroll</kbd>
+            <kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-[#DA1F26] font-sans">⇧ + ⌘ + Scroll</kbd>
             <span>Pan</span>
           </span>
           <span className="flex items-center gap-1.5">
-            <kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-[#34B27B] font-sans">⌘ + Scroll</kbd>
+            <kbd className="px-1.5 py-0.5 bg-white/5 border border-white/10 rounded text-[#DA1F26] font-sans">⌘ + Scroll</kbd>
             <span>Zoom</span>
           </span>
         </div>

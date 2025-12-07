@@ -22,7 +22,7 @@ const KeyframeMarkers: React.FC<KeyframeMarkersProps> = ({ keyframes, selectedKe
         return (
           <div
             key={kf.id}
-            className={`absolute top-8 cursor-pointer ${isSelected ? 'ring-2 ring-[#34B27B]' : ''}`}
+            className={`absolute top-8 cursor-pointer ${isSelected ? 'ring-2 ring-[#DA1F26]' : ''}`}
             style={{ left: `${sidebarWidth + offset - 8}px`, zIndex: 40 }}
             onClick={e => {
               e.stopPropagation();

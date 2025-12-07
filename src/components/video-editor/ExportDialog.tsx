@@ -46,8 +46,8 @@ export function ExportDialog({
           <div className="flex items-center gap-4">
             {showSuccess ? (
               <>
-                <div className="w-12 h-12 rounded-full bg-[#34B27B]/20 flex items-center justify-center ring-1 ring-[#34B27B]/50">
-                  <Download className="w-6 h-6 text-[#34B27B]" />
+                <div className="w-12 h-12 rounded-full bg-[#DA1F26]/20 flex items-center justify-center ring-1 ring-[#DA1F26]/50">
+                  <Download className="w-6 h-6 text-[#DA1F26]" />
                 </div>
                 <div>
                   <span className="text-xl font-bold text-slate-200 block">Export Complete</span>
@@ -57,8 +57,8 @@ export function ExportDialog({
             ) : (
               <>
                 {isExporting ? (
-                  <div className="w-12 h-12 rounded-full bg-[#34B27B]/10 flex items-center justify-center">
-                    <Loader2 className="w-6 h-6 text-[#34B27B] animate-spin" />
+                  <div className="w-12 h-12 rounded-full bg-[#DA1F26]/10 flex items-center justify-center">
+                    <Loader2 className="w-6 h-6 text-[#DA1F26] animate-spin" />
                   </div>
                 ) : (
                   <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center border border-white/10">
@@ -108,7 +108,7 @@ export function ExportDialog({
               </div>
               <div className="h-2 bg-white/5 rounded-full overflow-hidden border border-white/5">
                 <div
-                  className="h-full bg-[#34B27B] shadow-[0_0_10px_rgba(52,178,123,0.3)] transition-all duration-300 ease-out"
+                  className="h-full bg-[#DA1F26] shadow-[0_0_10px_rgba(218,31,38,0.3)] transition-all duration-300 ease-out"
                   style={{ width: `${Math.min(progress.percentage, 100)}%` }}
                 />
               </div>
@@ -124,7 +124,7 @@ export function ExportDialog({
               <div className="bg-white/5 rounded-xl p-3 border border-white/5">
                 <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Status</div>
                 <div className="text-slate-200 font-medium text-sm flex items-center gap-2 h-[28px]">
-                  <span className="w-2 h-2 rounded-full bg-[#34B27B] animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-[#DA1F26] animate-pulse" />
                   Processing
                 </div>
               </div>

@@ -71,7 +71,7 @@ function createEditorWindow() {
     resizable: true,
     alwaysOnTop: false,
     skipTaskbar: false,
-    title: "OpenScreen",
+    title: "AHA Clips",
     backgroundColor: "#000000",
     webPreferences: {
       preload: path.join(__dirname$2, "preload.mjs"),
@@ -132,8 +132,8 @@ function createSourceSelectorWindow(mode) {
 function createCameraPreviewWindow() {
   console.log("🔵 windows.ts: createCameraPreviewWindow called");
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const winWidth = 310;
-  const winHeight = 310;
+  const winWidth = 250;
+  const winHeight = 250;
   const x = Math.round(width - winWidth - 20);
   const y = 20;
   console.log("🔵 windows.ts: Creating camera preview window at", x, y, "size", winWidth, "x", winHeight);
@@ -360,10 +360,255 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
       return { success: false, message: "Failed to get video path", error: String(error) };
     }
   });
-  ipcMain.handle("set-recording-state", (_, recording) => {
+  let clickDetectionProcess = null;
+  let recordingStartTime = 0;
+  let autoZoomEnabled = false;
+  let screenBounds = null;
+  let lastClickTime = 0;
+  const CLICK_DEBOUNCE_MS = 100;
+  const handleMouseClick = (x, y) => {
+    if (!autoZoomEnabled) return;
+    const now = Date.now();
+    if (now - lastClickTime < CLICK_DEBOUNCE_MS) {
+      return;
+    }
+    lastClickTime = now;
+    const relativeTime = now - recordingStartTime;
+    const normalizedX = screenBounds ? x / screenBounds.width : 0.5;
+    const normalizedY = screenBounds ? y / screenBounds.height : 0.5;
+    console.log("🔵 Auto-zoom: Mouse click detected at:", { x: normalizedX, y: normalizedY, time: relativeTime, absolute: { x, y } });
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send("auto-zoom-click-event", {
+        x: normalizedX,
+        y: normalizedY,
+        timestamp: relativeTime
+      });
+      console.log("🔵 Auto-zoom: Click event sent successfully");
+    } else {
+      console.warn("🔵 Auto-zoom: Cannot send click event - main window is null or destroyed");
+    }
+  };
+  const startMouseClickDetection = async () => {
+    const { screen: screen2 } = await import("electron");
+    const os = await import("os");
+    const platform = os.platform();
+    console.log("🔵 Auto-zoom: Starting mouse click detection on platform:", platform);
+    if (platform === "linux") {
+      await startLinuxMouseClickDetection(screen2);
+    } else if (platform === "darwin") {
+      console.warn("🔵 Auto-zoom: macOS mouse click detection not yet implemented");
+      console.log("🔵 Auto-zoom: For macOS, consider using:");
+      console.log("   1. CGEventTap API (requires native module)");
+      console.log("   2. iohook npm package (cross-platform native module)");
+      console.log("   3. robotjs npm package (cross-platform native module)");
+    } else if (platform === "win32") {
+      console.warn("🔵 Auto-zoom: Windows mouse click detection not yet implemented");
+      console.log("🔵 Auto-zoom: For Windows, consider using:");
+      console.log("   1. SetWindowsHookEx API (requires native module)");
+      console.log("   2. iohook npm package (cross-platform native module)");
+      console.log("   3. robotjs npm package (cross-platform native module)");
+    } else {
+      console.warn("🔵 Auto-zoom: Unsupported platform:", platform);
+    }
+  };
+  const startLinuxMouseClickDetection = async (screen2) => {
+    const { spawn, exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+    try {
+      const { stdout: deviceList } = await execAsync("xinput list");
+      const lines = deviceList.split("\n");
+      let mouseDeviceId = null;
+      for (const line of lines) {
+        const lowerLine = line.toLowerCase();
+        if ((lowerLine.includes("mouse") || lowerLine.includes("trackpad") || lowerLine.includes("touchpad")) && !lowerLine.includes("xtest") && !lowerLine.includes("virtual core") && !lowerLine.includes("master pointer") && lowerLine.includes("slave")) {
+          const match = line.match(/id=(\d+)/);
+          if (match) {
+            mouseDeviceId = match[1];
+            console.log("🔵 Auto-zoom: Found real mouse device:", line.trim(), "ID:", mouseDeviceId);
+            break;
+          }
+        }
+      }
+      if (!mouseDeviceId) {
+        for (const line of lines) {
+          const lowerLine = line.toLowerCase();
+          if (lowerLine.includes("slave") && lowerLine.includes("pointer") && !lowerLine.includes("xtest") && !lowerLine.includes("virtual core") && !lowerLine.includes("master")) {
+            const match = line.match(/id=(\d+)/);
+            if (match) {
+              mouseDeviceId = match[1];
+              console.log("🔵 Auto-zoom: Found pointer device (fallback):", line.trim(), "ID:", mouseDeviceId);
+              break;
+            }
+          }
+        }
+      }
+      if (!mouseDeviceId) {
+        console.warn("🔵 Auto-zoom: Could not find mouse device, click detection disabled");
+        console.log("🔵 Auto-zoom: Available devices:", deviceList);
+        return;
+      }
+      let xinputProcess = null;
+      let useTestXi2 = false;
+      try {
+        xinputProcess = spawn("xinput", ["test", mouseDeviceId]);
+        console.log("🔵 Auto-zoom: Using xinput test with device ID:", mouseDeviceId);
+      } catch (error) {
+        console.warn("🔵 Auto-zoom: test failed, trying test-xi2 --root:", error);
+        useTestXi2 = true;
+        try {
+          xinputProcess = spawn("xinput", ["test-xi2", "--root"]);
+          console.log("🔵 Auto-zoom: Using xinput test-xi2 --root as fallback");
+        } catch (xi2Error) {
+          console.error("🔵 Auto-zoom: Both test methods failed:", xi2Error);
+          return;
+        }
+      }
+      let buttonPressed = false;
+      let clickX = 0;
+      let clickY = 0;
+      xinputProcess.stdout.on("data", (data) => {
+        const output = data.toString();
+        console.log("🔵 Auto-zoom: Raw xinput output:", output.substring(0, 200));
+        const lines2 = output.split("\n");
+        for (const line of lines2) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+          if (useTestXi2) {
+            const lowerLine = trimmedLine.toLowerCase();
+            if (lowerLine.includes("button")) {
+              if (lowerLine.includes("press") || lowerLine.includes("down")) {
+                buttonPressed = true;
+                const xMatch = trimmedLine.match(/(?:root_)?x[=:]?\s*([\d.]+)/i);
+                const yMatch = trimmedLine.match(/(?:root_)?y[=:]?\s*([\d.]+)/i);
+                if (xMatch && yMatch) {
+                  clickX = parseFloat(xMatch[1]);
+                  clickY = parseFloat(yMatch[1]);
+                } else {
+                  const cursorPoint = screen2.getCursorScreenPoint();
+                  clickX = cursorPoint.x;
+                  clickY = cursorPoint.y;
+                }
+                console.log("🔵 Auto-zoom: Button pressed at:", { x: clickX, y: clickY, rawLine: trimmedLine });
+              } else if ((lowerLine.includes("release") || lowerLine.includes("up")) && buttonPressed) {
+                buttonPressed = false;
+                console.log("🔵 Auto-zoom: Button released, handling click at:", { x: clickX, y: clickY });
+                handleMouseClick(clickX, clickY);
+              }
+            }
+          } else {
+            if (trimmedLine.includes("button press")) {
+              buttonPressed = true;
+              const cursorPoint = screen2.getCursorScreenPoint();
+              clickX = cursorPoint.x;
+              clickY = cursorPoint.y;
+              console.log("🔵 Auto-zoom: Button pressed at:", { x: clickX, y: clickY });
+            } else if (trimmedLine.includes("button release") && buttonPressed) {
+              buttonPressed = false;
+              console.log("🔵 Auto-zoom: Button released, handling click at:", { x: clickX, y: clickY });
+              handleMouseClick(clickX, clickY);
+            }
+          }
+        }
+      });
+      xinputProcess.stderr.on("data", (data) => {
+        const error = data.toString();
+        if (useTestXi2 && error.includes("Unable to find device") || error.includes("error")) {
+          console.warn("🔵 Auto-zoom: test-xi2 failed, trying test with device ID:", mouseDeviceId);
+          useTestXi2 = false;
+          if (xinputProcess) {
+            xinputProcess.kill();
+          }
+          try {
+            xinputProcess = spawn("xinput", ["test", mouseDeviceId]);
+            xinputProcess.stdout.on("data", (data2) => {
+              const output = data2.toString();
+              const lines2 = output.split("\n");
+              for (const line of lines2) {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) continue;
+                if (trimmedLine.includes("button press")) {
+                  buttonPressed = true;
+                  const cursorPoint = screen2.getCursorScreenPoint();
+                  clickX = cursorPoint.x;
+                  clickY = cursorPoint.y;
+                  console.log("🔵 Auto-zoom: Button pressed at:", { x: clickX, y: clickY });
+                } else if (trimmedLine.includes("button release") && buttonPressed) {
+                  buttonPressed = false;
+                  handleMouseClick(clickX, clickY);
+                }
+              }
+            });
+            clickDetectionProcess = xinputProcess;
+          } catch (fallbackError) {
+            console.error("🔵 Auto-zoom: Fallback to test also failed:", fallbackError);
+          }
+        } else if (!error.includes("WARNING") && !error.includes("Unable to connect")) {
+          console.error("🔵 Auto-zoom: xinput error:", error);
+        }
+      });
+      xinputProcess.on("close", (code) => {
+        console.log("🔵 Auto-zoom: xinput process closed with code:", code);
+        if (code !== 0 && code !== null) {
+          console.warn("🔵 Auto-zoom: xinput process exited unexpectedly");
+        }
+      });
+      xinputProcess.on("error", (error) => {
+        console.error("🔵 Auto-zoom: xinput process error:", error);
+      });
+      clickDetectionProcess = xinputProcess;
+      console.log("🔵 Auto-zoom: Mouse click detection started successfully");
+    } catch (error) {
+      console.error("🔵 Auto-zoom: Error starting mouse click detection:", error);
+    }
+  };
+  const stopMouseClickDetection = () => {
+    if (clickDetectionProcess) {
+      try {
+        clickDetectionProcess.kill();
+        clickDetectionProcess = null;
+        console.log("🔵 Auto-zoom: Mouse click detection stopped");
+      } catch (error) {
+        console.error("🔵 Auto-zoom: Error stopping click detection:", error);
+      }
+    }
+  };
+  ipcMain.handle("set-recording-state", async (_, recording, autoZoom) => {
     const source = selectedSource || { name: "Screen" };
     if (onRecordingStateChange) {
       onRecordingStateChange(recording, source.name);
+    }
+    autoZoomEnabled = autoZoom || false;
+    if (recording && autoZoomEnabled) {
+      recordingStartTime = Date.now();
+      lastClickTime = 0;
+      const { screen: screen2 } = await import("electron");
+      const primaryDisplay = screen2.getPrimaryDisplay();
+      screenBounds = {
+        width: primaryDisplay.workAreaSize.width,
+        height: primaryDisplay.workAreaSize.height
+      };
+      console.log("🔵 Auto-zoom: Starting mouse click detection");
+      await startMouseClickDetection();
+    } else {
+      stopMouseClickDetection();
+      console.log("🔵 Auto-zoom: Stopping click detection");
+    }
+  });
+  ipcMain.on("auto-zoom-click", (_, data) => {
+    if (!autoZoomEnabled) return;
+    const relativeTime = data.timestamp - recordingStartTime;
+    const normalizedX = screenBounds ? data.x / screenBounds.width : 0.5;
+    const normalizedY = screenBounds ? data.y / screenBounds.height : 0.5;
+    console.log("🔵 Auto-zoom: Click detected at", { x: normalizedX, y: normalizedY, time: relativeTime });
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send("auto-zoom-click-event", {
+        x: normalizedX,
+        y: normalizedY,
+        timestamp: relativeTime
+      });
     }
   });
   ipcMain.handle("open-camera-preview", () => {
@@ -450,11 +695,13 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
   });
   ipcMain.handle("save-exported-video", async (_, videoData, fileName) => {
     try {
+      const isGif = fileName.endsWith(".gif");
       const result = await dialog.showSaveDialog({
-        title: "Save Exported Video",
+        title: isGif ? "Save Exported GIF" : "Save Exported Video",
         defaultPath: path.join(app.getPath("downloads"), fileName),
         filters: [
-          { name: "MP4 Video", extensions: ["mp4"] }
+          { name: isGif ? "GIF Image" : "MP4 Video", extensions: [isGif ? "gif" : "mp4"] },
+          { name: "All Files", extensions: ["*"] }
         ],
         properties: ["createDirectory", "showOverwriteConfirmation"]
       });

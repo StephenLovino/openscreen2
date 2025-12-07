@@ -27,5 +27,20 @@ export function findDominantRegion(regions: ZoomRegion[], timeMs: number) {
     }
   }
 
+  // Debug logging (only log when a region is found to avoid spam)
+  if (bestRegion && bestStrength > 0) {
+    // Only log occasionally to avoid console spam
+    if (Math.random() < 0.01) { // Log ~1% of the time
+      console.log('🔵 findDominantRegion: Found active zoom at', timeMs, 'ms:', {
+        id: bestRegion.id,
+        strength: bestStrength.toFixed(3),
+        startMs: bestRegion.startMs,
+        endMs: bestRegion.endMs,
+        focus: bestRegion.focus,
+        totalRegions: regions.length
+      });
+    }
+  }
+
   return { region: bestRegion, strength: bestStrength };
 }

@@ -17,9 +17,9 @@
 }
 
 .selected {
-  border: 2px solid #34B27B;
+  border: 2px solid #DA1F26;
   background: linear-gradient(120deg, rgba(91,33,182,0.18) 0%, rgba(38,38,48,0.98) 100%);
-  box-shadow: 0 0 0 2px #34B27B33;
+  box-shadow: 0 0 0 2px rgba(218,31,38,0.2);
 }
 
 .icon {

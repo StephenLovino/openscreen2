@@ -90,7 +90,7 @@ export function createEditorWindow(): BrowserWindow {
     resizable: true,
     alwaysOnTop: false,
     skipTaskbar: false,
-    title: 'OpenScreen',
+    title: 'AHA Clips',
     backgroundColor: '#000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
@@ -168,10 +168,10 @@ export function createCameraPreviewWindow(): BrowserWindow {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
   
   // Create a compact floating window, positioned top-right.
-  // Size matches editor overlay: 250px preview + ~60px for controls = 310px total
+  // Size matches editor overlay: 250px preview
   // Initial size will be adjusted by the component based on shape/size selection
-  const winWidth = 310;
-  const winHeight = 310;
+  const winWidth = 250;
+  const winHeight = 250;
   const x = Math.round(width - winWidth - 20);
   const y = 20;
   

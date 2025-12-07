@@ -177,10 +177,375 @@ export function registerIpcHandlers(
     }
   })
 
-  ipcMain.handle('set-recording-state', (_, recording: boolean) => {
+  // Auto-zoom click detection
+  let clickDetectionProcess: any = null;
+  let recordingStartTime = 0;
+  let autoZoomEnabled = false;
+  let screenBounds: { width: number; height: number } | null = null;
+  let lastClickTime = 0;
+  const CLICK_DEBOUNCE_MS = 100; // Prevent duplicate clicks
+
+  // Function to handle mouse click detection
+  const handleMouseClick = (x: number, y: number) => {
+    if (!autoZoomEnabled) return;
+    
+    const now = Date.now();
+    // Debounce: ignore clicks within 100ms of each other
+    if (now - lastClickTime < CLICK_DEBOUNCE_MS) {
+      return;
+    }
+    lastClickTime = now;
+    
+    const relativeTime = now - recordingStartTime;
+    const normalizedX = screenBounds ? x / screenBounds.width : 0.5;
+    const normalizedY = screenBounds ? y / screenBounds.height : 0.5;
+    
+    console.log('🔵 Auto-zoom: Mouse click detected at:', { x: normalizedX, y: normalizedY, time: relativeTime, absolute: { x, y } });
+    
+    // Send click event to renderer (HUD overlay window)
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send('auto-zoom-click-event', {
+        x: normalizedX,
+        y: normalizedY,
+        timestamp: relativeTime
+      });
+      console.log('🔵 Auto-zoom: Click event sent successfully');
+    } else {
+      console.warn('🔵 Auto-zoom: Cannot send click event - main window is null or destroyed');
+    }
+  };
+
+  /**
+   * Cross-platform mouse click detection for auto-zoom feature
+   * 
+   * Platform-specific approaches:
+   * 
+   * LINUX (Current Implementation):
+   *   - Uses `xinput` command-line tool to monitor mouse button events
+   *   - Dynamically finds mouse device ID by scanning `xinput list` output
+   *   - Works for all users regardless of their mouse device ID
+   *   - No additional dependencies required
+   * 
+   * macOS (TODO):
+   *   Option 1: CGEventTap API (Recommended)
+   *     - Native macOS API for global event monitoring
+   *     - Requires native module or Electron's native API access
+   *     - Most reliable and performant
+   *     - May require accessibility permissions
+   * 
+   *   Option 2: iohook npm package
+   *     - Cross-platform native module: npm install iohook
+   *     - Works on Linux, macOS, and Windows
+   *     - Requires compilation of native bindings
+   *     - Example: https://github.com/wilix-team/iohook
+   * 
+   *   Option 3: robotjs npm package
+   *     - Cross-platform native module: npm install robotjs
+   *     - Primarily for automation but can monitor events
+   *     - Requires compilation of native bindings
+   * 
+   * WINDOWS (TODO):
+   *   Option 1: SetWindowsHookEx API (Recommended)
+   *     - Native Windows API for global hooks
+   *     - Requires native module or Electron's native API access
+   *     - Most reliable and performant
+   *     - May require elevated permissions
+   * 
+   *   Option 2: iohook npm package
+   *     - Same as macOS Option 2
+   *     - Cross-platform solution
+   * 
+   *   Option 3: robotjs npm package
+   *     - Same as macOS Option 3
+   *     - Cross-platform solution
+   */
+  const startMouseClickDetection = async () => {
+    const { screen } = await import('electron');
+    const os = await import('os');
+    const platform = os.platform();
+    
+    console.log('🔵 Auto-zoom: Starting mouse click detection on platform:', platform);
+    
+    // Platform-specific implementations
+    if (platform === 'linux') {
+      await startLinuxMouseClickDetection(screen);
+    } else if (platform === 'darwin') {
+      // macOS - TODO: Implement using CGEventTap or native module
+      console.warn('🔵 Auto-zoom: macOS mouse click detection not yet implemented');
+      console.log('🔵 Auto-zoom: For macOS, consider using:');
+      console.log('   1. CGEventTap API (requires native module)');
+      console.log('   2. iohook npm package (cross-platform native module)');
+      console.log('   3. robotjs npm package (cross-platform native module)');
+    } else if (platform === 'win32') {
+      // Windows - TODO: Implement using Windows API hooks or native module
+      console.warn('🔵 Auto-zoom: Windows mouse click detection not yet implemented');
+      console.log('🔵 Auto-zoom: For Windows, consider using:');
+      console.log('   1. SetWindowsHookEx API (requires native module)');
+      console.log('   2. iohook npm package (cross-platform native module)');
+      console.log('   3. robotjs npm package (cross-platform native module)');
+    } else {
+      console.warn('🔵 Auto-zoom: Unsupported platform:', platform);
+    }
+  };
+
+  // Linux-specific mouse click detection using xinput
+  const startLinuxMouseClickDetection = async (screen: typeof import('electron').screen) => {
+    const { spawn, exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+    
+    try {
+      // Find the mouse device ID by searching for slave pointer devices
+      const { stdout: deviceList } = await execAsync('xinput list');
+      const lines = deviceList.split('\n');
+      
+      let mouseDeviceId: string | null = null;
+      // First, try to find a real physical mouse device (exclude XTEST and virtual devices)
+      for (const line of lines) {
+        const lowerLine = line.toLowerCase();
+        // Look for real mouse devices, exclude virtual/XTEST devices
+        if ((lowerLine.includes('mouse') || lowerLine.includes('trackpad') || lowerLine.includes('touchpad'))
+            && !lowerLine.includes('xtest')
+            && !lowerLine.includes('virtual core')
+            && !lowerLine.includes('master pointer')
+            && lowerLine.includes('slave')) {
+          const match = line.match(/id=(\d+)/);
+          if (match) {
+            mouseDeviceId = match[1];
+            console.log('🔵 Auto-zoom: Found real mouse device:', line.trim(), 'ID:', mouseDeviceId);
+            break;
+          }
+        }
+      }
+      
+      // If no real device found, try any slave pointer device (excluding XTEST)
+      if (!mouseDeviceId) {
+        for (const line of lines) {
+          const lowerLine = line.toLowerCase();
+          if (lowerLine.includes('slave') 
+              && lowerLine.includes('pointer')
+              && !lowerLine.includes('xtest')
+              && !lowerLine.includes('virtual core')
+              && !lowerLine.includes('master')) {
+            const match = line.match(/id=(\d+)/);
+            if (match) {
+              mouseDeviceId = match[1];
+              console.log('🔵 Auto-zoom: Found pointer device (fallback):', line.trim(), 'ID:', mouseDeviceId);
+              break;
+            }
+          }
+        }
+      }
+      
+      if (!mouseDeviceId) {
+        console.warn('🔵 Auto-zoom: Could not find mouse device, click detection disabled');
+        console.log('🔵 Auto-zoom: Available devices:', deviceList);
+        return;
+      }
+      
+      // Use device-specific test command (more reliable than test-xi2 --root)
+      let xinputProcess: any = null;
+      let useTestXi2 = false;
+      
+      try {
+        // Use device-specific test command since we have a real mouse device
+        xinputProcess = spawn('xinput', ['test', mouseDeviceId]);
+        console.log('🔵 Auto-zoom: Using xinput test with device ID:', mouseDeviceId);
+      } catch (error) {
+        console.warn('🔵 Auto-zoom: test failed, trying test-xi2 --root:', error);
+        useTestXi2 = true;
+        try {
+          xinputProcess = spawn('xinput', ['test-xi2', '--root']);
+          console.log('🔵 Auto-zoom: Using xinput test-xi2 --root as fallback');
+        } catch (xi2Error) {
+          console.error('🔵 Auto-zoom: Both test methods failed:', xi2Error);
+          return;
+        }
+      }
+      
+      let buttonPressed = false;
+      let clickX = 0;
+      let clickY = 0;
+      
+      xinputProcess.stdout.on('data', (data: Buffer) => {
+        const output = data.toString();
+        console.log('🔵 Auto-zoom: Raw xinput output:', output.substring(0, 200)); // Log first 200 chars for debugging
+        const lines = output.split('\n');
+        
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+          
+          if (useTestXi2) {
+            // xinput test-xi2 output format: structured events with type, detail, etc.
+            // Example: "EVENT type 4 (ButtonPress) ..." or just look for button-related lines
+            // The format can vary, so we check for button-related keywords
+            const lowerLine = trimmedLine.toLowerCase();
+            if (lowerLine.includes('button')) {
+              // Check for press or release
+              if (lowerLine.includes('press') || lowerLine.includes('down')) {
+                buttonPressed = true;
+                // Extract coordinates - test-xi2 might have root_x, root_y or x, y
+                const xMatch = trimmedLine.match(/(?:root_)?x[=:]?\s*([\d.]+)/i);
+                const yMatch = trimmedLine.match(/(?:root_)?y[=:]?\s*([\d.]+)/i);
+                if (xMatch && yMatch) {
+                  clickX = parseFloat(xMatch[1]);
+                  clickY = parseFloat(yMatch[1]);
+                } else {
+                  // Fallback to cursor position
+                  const cursorPoint = screen.getCursorScreenPoint();
+                  clickX = cursorPoint.x;
+                  clickY = cursorPoint.y;
+                }
+                console.log('🔵 Auto-zoom: Button pressed at:', { x: clickX, y: clickY, rawLine: trimmedLine });
+              } else if ((lowerLine.includes('release') || lowerLine.includes('up')) && buttonPressed) {
+                buttonPressed = false;
+                console.log('🔵 Auto-zoom: Button released, handling click at:', { x: clickX, y: clickY });
+                handleMouseClick(clickX, clickY);
+              }
+            }
+          } else {
+            // xinput test output format: "button press   1" or "button release   1"
+            if (trimmedLine.includes('button press')) {
+              buttonPressed = true;
+              // Get cursor position when button is pressed
+              const cursorPoint = screen.getCursorScreenPoint();
+              clickX = cursorPoint.x;
+              clickY = cursorPoint.y;
+              console.log('🔵 Auto-zoom: Button pressed at:', { x: clickX, y: clickY });
+            } else if (trimmedLine.includes('button release') && buttonPressed) {
+              buttonPressed = false;
+              // Handle the click
+              console.log('🔵 Auto-zoom: Button released, handling click at:', { x: clickX, y: clickY });
+              handleMouseClick(clickX, clickY);
+            }
+          }
+        }
+      });
+      
+      xinputProcess.stderr.on('data', (data: Buffer) => {
+        const error = data.toString();
+        // If test-xi2 fails, try falling back to test
+        if (useTestXi2 && error.includes('Unable to find device') || error.includes('error')) {
+          console.warn('🔵 Auto-zoom: test-xi2 failed, trying test with device ID:', mouseDeviceId);
+          useTestXi2 = false;
+          if (xinputProcess) {
+            xinputProcess.kill();
+          }
+          try {
+            xinputProcess = spawn('xinput', ['test', mouseDeviceId]);
+            // Re-attach event handlers
+            xinputProcess.stdout.on('data', (data: Buffer) => {
+              const output = data.toString();
+              const lines = output.split('\n');
+              for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) continue;
+                if (trimmedLine.includes('button press')) {
+                  buttonPressed = true;
+                  const cursorPoint = screen.getCursorScreenPoint();
+                  clickX = cursorPoint.x;
+                  clickY = cursorPoint.y;
+                  console.log('🔵 Auto-zoom: Button pressed at:', { x: clickX, y: clickY });
+                } else if (trimmedLine.includes('button release') && buttonPressed) {
+                  buttonPressed = false;
+                  handleMouseClick(clickX, clickY);
+                }
+              }
+            });
+            clickDetectionProcess = xinputProcess;
+          } catch (fallbackError) {
+            console.error('🔵 Auto-zoom: Fallback to test also failed:', fallbackError);
+          }
+        } else if (!error.includes('WARNING') && !error.includes('Unable to connect')) {
+          console.error('🔵 Auto-zoom: xinput error:', error);
+        }
+      });
+      
+      xinputProcess.on('close', (code: number | null) => {
+        console.log('🔵 Auto-zoom: xinput process closed with code:', code);
+        if (code !== 0 && code !== null) {
+          console.warn('🔵 Auto-zoom: xinput process exited unexpectedly');
+        }
+      });
+      
+      xinputProcess.on('error', (error: Error) => {
+        console.error('🔵 Auto-zoom: xinput process error:', error);
+      });
+      
+      clickDetectionProcess = xinputProcess;
+      console.log('🔵 Auto-zoom: Linux mouse click detection started successfully');
+      
+    } catch (error) {
+      console.error('🔵 Auto-zoom: Error starting Linux mouse click detection:', error);
+    }
+  };
+
+  // Function to stop mouse click detection
+  const stopMouseClickDetection = () => {
+    if (clickDetectionProcess) {
+      try {
+        clickDetectionProcess.kill();
+        clickDetectionProcess = null;
+        console.log('🔵 Auto-zoom: Mouse click detection stopped');
+      } catch (error) {
+        console.error('🔵 Auto-zoom: Error stopping click detection:', error);
+      }
+    }
+  };
+
+  ipcMain.handle('set-recording-state', async (_, recording: boolean, autoZoom?: boolean) => {
     const source = selectedSource || { name: 'Screen' }
     if (onRecordingStateChange) {
       onRecordingStateChange(recording, source.name)
+    }
+    
+    // Handle auto-zoom click detection
+    autoZoomEnabled = autoZoom || false;
+    
+    if (recording && autoZoomEnabled) {
+      // Start click detection
+      recordingStartTime = Date.now();
+      lastClickTime = 0;
+      const { screen } = await import('electron');
+      const primaryDisplay = screen.getPrimaryDisplay();
+      screenBounds = {
+        width: primaryDisplay.workAreaSize.width,
+        height: primaryDisplay.workAreaSize.height
+      };
+      
+      console.log('🔵 Auto-zoom: Starting mouse click detection');
+      
+      // Start mouse click detection
+      await startMouseClickDetection();
+    } else {
+      // Stop click detection
+      stopMouseClickDetection();
+      console.log('🔵 Auto-zoom: Stopping click detection');
+    }
+  })
+
+  // Handler to receive click events from renderer (when user clicks anywhere)
+  ipcMain.on('auto-zoom-click', (_, data: { x: number; y: number, timestamp: number }) => {
+    if (!autoZoomEnabled) return;
+    
+    const relativeTime = data.timestamp - recordingStartTime;
+    const normalizedX = screenBounds ? data.x / screenBounds.width : 0.5;
+    const normalizedY = screenBounds ? data.y / screenBounds.height : 0.5;
+    
+    // Store click event in sessionStorage (we'll do this from renderer)
+    // For now, just log it
+    console.log('🔵 Auto-zoom: Click detected at', { x: normalizedX, y: normalizedY, time: relativeTime });
+    
+    // Send to renderer to store in sessionStorage
+    const mainWin = getMainWindow();
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send('auto-zoom-click-event', {
+        x: normalizedX,
+        y: normalizedY,
+        timestamp: relativeTime
+      });
     }
   })
 
@@ -282,11 +647,13 @@ export function registerIpcHandlers(
 
   ipcMain.handle('save-exported-video', async (_, videoData: ArrayBuffer, fileName: string) => {
     try {
+      const isGif = fileName.endsWith('.gif');
       const result = await dialog.showSaveDialog({
-        title: 'Save Exported Video',
+        title: isGif ? 'Save Exported GIF' : 'Save Exported Video',
         defaultPath: path.join(app.getPath('downloads'), fileName),
         filters: [
-          { name: 'MP4 Video', extensions: ['mp4'] }
+          { name: isGif ? 'GIF Image' : 'MP4 Video', extensions: [isGif ? 'gif' : 'mp4'] },
+          { name: 'All Files', extensions: ['*'] }
         ],
         properties: ['createDirectory', 'showOverwriteConfirmation']
       });

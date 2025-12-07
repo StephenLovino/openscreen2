@@ -40,8 +40,14 @@ electron.contextBridge.exposeInMainWorld("electronAPI", {
   storeRecordedCameraVideo: (videoData, fileName) => {
     return electron.ipcRenderer.invoke("store-recorded-camera-video", videoData, fileName);
   },
-  setRecordingState: (recording) => {
-    return electron.ipcRenderer.invoke("set-recording-state", recording);
+  setRecordingState: (recording, autoZoomEnabled) => {
+    return electron.ipcRenderer.invoke("set-recording-state", recording, autoZoomEnabled);
+  },
+  on: (channel, callback) => {
+    electron.ipcRenderer.on(channel, callback);
+  },
+  off: (channel, callback) => {
+    electron.ipcRenderer.removeListener(channel, callback);
   },
   onStopRecordingFromTray: (callback) => {
     const listener = () => callback();

@@ -349,9 +349,9 @@ export const apiBridge = {
   },
 
   // Set recording state
-  async setRecordingState(recording: boolean): Promise<void> {
+  async setRecordingState(recording: boolean, autoZoomEnabled?: boolean): Promise<void> {
     if (isElectron()) {
-      await window.electronAPI.setRecordingState(recording);
+      await window.electronAPI.setRecordingState(recording, autoZoomEnabled);
     }
     // Web: No-op (no tray)
   },

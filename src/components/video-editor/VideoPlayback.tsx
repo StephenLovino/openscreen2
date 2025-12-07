@@ -72,7 +72,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
   trimRegions = [],
   hideCamera = false,
   cameraVideoPath = null,
-  cameraSize = 250,
+  cameraSize = 150,
   cameraPosition = { x: 0, y: 0 },
   onCameraPositionChange,
 }, ref) => {
@@ -963,7 +963,7 @@ const VideoPlayback = forwardRef<VideoPlaybackRef, VideoPlaybackProps>(({
         >
           <div
             ref={focusIndicatorRef}
-            className="absolute rounded-md border border-[#34B27B]/80 bg-[#34B27B]/20 shadow-[0_0_0_1px_rgba(52,178,123,0.35)]"
+            className="absolute rounded-md border border-[#DA1F26]/80 bg-[#DA1F26]/20 shadow-[0_0_0_1px_rgba(218,31,38,0.35)]"
             style={{ display: 'none', pointerEvents: 'none' }}
           />
         </div>

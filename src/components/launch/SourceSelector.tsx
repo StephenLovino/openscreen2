@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Card } from "../ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { Switch } from "../ui/switch";
-import { MdVideocam, MdMic, MdVolumeUp } from "react-icons/md";
+import { MdVideocam, MdMic, MdVolumeUp, MdMonitor } from "react-icons/md";
 import styles from "./SourceSelector.module.css";
 import { apiBridge } from "../../lib/apiBridge";
 
@@ -52,6 +52,7 @@ export function SourceSelector() {
   });
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
   const [mediaDevices, setMediaDevices] = useState<MediaDeviceInfo[]>([]);
+  const [autoZoomEnabled, setAutoZoomEnabled] = useState(false);
   const cameraStreamRef = useRef<MediaStream | null>(null);
 
   // Detect mode from URL - check on mount and when URL changes
@@ -260,7 +261,16 @@ export function SourceSelector() {
     // Add screen source if selected
     if (selectedScreenSource) {
       console.log('🔵 SourceSelector: Adding screen source:', selectedScreenSource);
-      sourcesToShare.push(selectedScreenSource);
+      // Attach audioConfig and autoZoomEnabled to screen source
+      const screenWithAudio = {
+        ...selectedScreenSource,
+        audioConfig: audioConfig,
+        autoZoomEnabled: autoZoomEnabled
+      };
+      sourcesToShare.push(screenWithAudio);
+      
+      // Store auto-zoom preference in sessionStorage for later use
+      sessionStorage.setItem('autoZoomEnabled', String(autoZoomEnabled));
     }
     
     // Add camera source if selected
@@ -277,9 +287,10 @@ export function SourceSelector() {
     // This handles the case where camera was auto-selected but selectedCameraSource wasn't set
     if (sourcesToShare.length === 0 && selectedSource) {
       console.log('🔵 SourceSelector: Using fallback selectedSource:', selectedSource);
+      // Always attach audioConfig - it applies to both screen and camera sources
       const sourceWithAudio = {
         ...selectedSource,
-        audioConfig: mode === 'camera' ? audioConfig : undefined
+        audioConfig: audioConfig
       };
       // If it's a camera source, make sure it has the type
       if (sourceWithAudio.id?.startsWith('camera:') && !sourceWithAudio.type) {
@@ -421,9 +432,9 @@ export function SourceSelector() {
                       >
                         <div className="flex items-center gap-2 w-full">
                           {selectedSource?.id === source.id && (
-                            <MdCheck className="h-3.5 w-3.5 text-[#34B27B]" />
+                            <MdCheck className="h-3.5 w-3.5 text-[#DA1F26]" />
                           )}
-                          <span className={selectedSource?.id === source.id ? 'text-[#34B27B]' : ''}>
+                          <span className={selectedSource?.id === source.id ? 'text-[#DA1F26]' : ''}>
                             {source.name}
                           </span>
                         </div>
@@ -486,9 +497,9 @@ export function SourceSelector() {
                       >
                         <div className="flex items-center gap-2 w-full">
                           {audioConfig.micDeviceId === device.deviceId && (
-                            <MdCheck className="h-3.5 w-3.5 text-[#34B27B]" />
+                            <MdCheck className="h-3.5 w-3.5 text-[#DA1F26]" />
                           )}
-                          <span className={audioConfig.micDeviceId === device.deviceId ? 'text-[#34B27B]' : ''}>
+                          <span className={audioConfig.micDeviceId === device.deviceId ? 'text-[#DA1F26]' : ''}>
                             {device.label || `Microphone ${micDevices.indexOf(device) + 1}`}
                           </span>
                         </div>
@@ -507,22 +518,6 @@ export function SourceSelector() {
                       ? micDevices[0].deviceId
                       : prev.micDeviceId
                   }));
-                }}
-              />
-            </div>
-          </div>
-
-          {/* System Audio Section - Cap style */}
-          <div className="mb-4">
-            <div className="flex items-center justify-between bg-zinc-900/60 rounded-lg p-4 border border-zinc-800/50">
-              <div className="flex items-center gap-3">
-                <MdVolumeUp size={18} className="text-zinc-400" />
-                <span className="text-sm text-zinc-200">Record System Audio</span>
-              </div>
-              <Switch
-                checked={audioConfig.mediaEnabled}
-                onCheckedChange={(checked) => {
-                  setAudioConfig(prev => ({ ...prev, mediaEnabled: checked }));
                 }}
               />
             </div>
@@ -547,7 +542,7 @@ export function SourceSelector() {
             <Button 
               onClick={handleShare} 
               disabled={mode === 'camera' ? !selectedCameraSource && !selectedSource : !selectedSource} 
-              className="px-8 py-2 text-sm bg-[#34B27B] text-white hover:bg-[#34B27B]/80 disabled:opacity-50 disabled:bg-zinc-700"
+              className="px-8 py-2 text-sm bg-[#DA1F26] text-white hover:bg-[#DA1F26]/80 disabled:opacity-50 disabled:bg-zinc-700"
             >
               Share
             </Button>
@@ -564,8 +559,8 @@ export function SourceSelector() {
       <div className="flex-1 flex flex-col w-full max-w-xl" style={{ padding: 0 }}>
         <Tabs defaultValue="screens">
           <TabsList className="grid grid-cols-2 mb-3 bg-zinc-900/40 rounded-full">
-            <TabsTrigger value="screens" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-zinc-200 rounded-full text-xs py-1">Screens</TabsTrigger>
-            <TabsTrigger value="windows" className="data-[state=active]:bg-[#34B27B] data-[state=active]:text-white text-zinc-200 rounded-full text-xs py-1">Windows</TabsTrigger>
+            <TabsTrigger value="screens" className="data-[state=active]:bg-[#DA1F26] data-[state=active]:text-white text-zinc-200 rounded-full text-xs py-1">Screens</TabsTrigger>
+            <TabsTrigger value="windows" className="data-[state=active]:bg-[#DA1F26] data-[state=active]:text-white text-zinc-200 rounded-full text-xs py-1">Windows</TabsTrigger>
           </TabsList>
             <div className="h-60 flex flex-col justify-stretch">
             <TabsContent value="screens" className="h-full">
@@ -592,7 +587,7 @@ export function SourceSelector() {
                         )}
                         {selectedSource?.id === source.id && (
                           <div className="absolute -top-1 -right-1">
-                            <div className="w-4 h-4 bg-[#34B27B] rounded-full flex items-center justify-center shadow-md">
+                            <div className="w-4 h-4 bg-[#DA1F26] rounded-full flex items-center justify-center shadow-md">
                               <MdCheck className={styles.icon} />
                             </div>
                           </div>
@@ -656,6 +651,47 @@ export function SourceSelector() {
           </div>
         </Tabs>
       </div>
+      
+      {/* System Audio Section for Screen Mode */}
+      {mode === 'screen' && (
+        <div className="px-4 py-3 w-full max-w-xl">
+          <div className="flex items-center justify-between bg-zinc-900/60 rounded-lg p-4 border border-zinc-800/50">
+            <div className="flex items-center gap-3">
+              <MdVolumeUp size={18} className="text-zinc-400" />
+              <span className="text-sm text-zinc-200">Record System Audio</span>
+            </div>
+            <Switch
+              checked={audioConfig.mediaEnabled}
+              onCheckedChange={(checked) => {
+                setAudioConfig(prev => ({ ...prev, mediaEnabled: checked }));
+              }}
+            />
+          </div>
+        </div>
+      )}
+      
+      {/* Auto-Zoom Section for Screen Mode */}
+      {mode === 'screen' && (
+        <div className="px-4 py-3 w-full max-w-xl">
+          <div className="flex items-center justify-between bg-zinc-900/60 rounded-lg p-4 border border-zinc-800/50">
+            <div className="flex items-center gap-3">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-zinc-400">
+                <path d="M15 12C15 13.6569 13.6569 15 12 15C10.3431 15 9 13.6569 9 12C9 10.3431 10.3431 9 12 9C13.6569 9 15 10.3431 15 12Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M2.458 12C3.732 7.943 7.523 5 12 5C16.478 5 20.268 7.943 21.542 12C20.268 16.057 16.478 19 12 19C7.523 19 3.732 16.057 2.458 12Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              <div className="flex flex-col">
+                <span className="text-sm text-zinc-200">Auto-Zoom on Click</span>
+                <span className="text-xs text-zinc-400">Automatically zoom in when you click during recording</span>
+              </div>
+            </div>
+            <Switch
+              checked={autoZoomEnabled}
+              onCheckedChange={setAutoZoomEnabled}
+            />
+          </div>
+        </div>
+      )}
+      
       <div className="border-t border-zinc-800 p-2 w-full max-w-xl">
         <div className="flex justify-center gap-2">
           <Button variant="outline" onClick={() => {
@@ -665,7 +701,7 @@ export function SourceSelector() {
               window.location.href = '/?windowType=hud-overlay';
             }
           }} className="px-4 py-1 text-xs bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700">Cancel</Button>
-          <Button onClick={handleShare} disabled={!selectedSource} className="px-4 py-1 text-xs bg-[#34B27B] text-white hover:bg-[#34B27B]/80 disabled:opacity-50 disabled:bg-zinc-700">Share</Button>
+          <Button onClick={handleShare} disabled={!selectedSource} className="px-4 py-1 text-xs bg-[#DA1F26] text-white hover:bg-[#DA1F26]/80 disabled:opacity-50 disabled:bg-zinc-700">Share</Button>
         </div>
       </div>
     </div>

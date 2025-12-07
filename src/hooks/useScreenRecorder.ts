@@ -23,6 +23,8 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
   const startTime = useRef<number>(0);
   const cameraStreamRef = useRef<MediaStream | null>(null); // Track camera stream separately
   const audioTracksRef = useRef<MediaStreamTrack[]>([]); // Track audio tracks separately for stopping
+  const audioContextRef = useRef<AudioContext | null>(null); // Track AudioContext for mixing audio
+  const autoZoomCleanupRef = useRef<(() => void) | null>(null); // Track auto-zoom click detection cleanup
 
   const stopRecording = useRef(async () => {
     if (mediaRecorder.current?.state === "recording") {
@@ -38,13 +40,43 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       cameraRecorder.current.stop();
     }
     setRecording(false);
-    await apiBridge.setRecordingState(false);
+    await apiBridge.setRecordingState(false, false); // Disable auto-zoom when stopping
+    
+    // Check if auto-zoom events were stored before cleaning up
+    const storedEvents = localStorage.getItem('autoZoomEvents');
+    console.log('🔵 useScreenRecorder: Recording stopped. Auto-zoom events in localStorage:', storedEvents);
+    if (storedEvents) {
+      try {
+        const events = JSON.parse(storedEvents);
+        console.log('🔵 useScreenRecorder: Found', events.length, 'auto-zoom events:', events);
+      } catch (e) {
+        console.error('🔵 useScreenRecorder: Failed to parse auto-zoom events:', e);
+      }
+    }
+    
+    // Clean up auto-zoom click detection
+    if (autoZoomCleanupRef.current) {
+      autoZoomCleanupRef.current();
+      autoZoomCleanupRef.current = null;
+    }
     
     // Stop camera stream and close preview when recording stops
     if (cameraStreamRef.current) {
       cameraStreamRef.current.getTracks().forEach(track => track.stop());
       cameraStreamRef.current = null;
     }
+    
+    // Clean up AudioContext if it was used for mixing
+    if (audioContextRef.current) {
+      try {
+        await audioContextRef.current.close();
+        console.log('🔵 useScreenRecorder: AudioContext closed');
+      } catch (error) {
+        console.warn('🔵 useScreenRecorder: Error closing AudioContext:', error);
+      }
+      audioContextRef.current = null;
+    }
+    
     await apiBridge.closeCameraPreview();
   });
 
@@ -124,16 +156,16 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         console.log('🔵 Checking source:', s.id, 'isCamera:', isCamera);
         return isCamera;
       });
-      const screenSource = sources.find(s => 
+      const foundScreenSource = sources.find(s => 
         s.type === 'screen' || s.id?.startsWith('screen:') || s.id?.startsWith('window:')
       );
 
       console.log('🔵 useScreenRecorder: cameraSource found?', !!cameraSource, cameraSource);
-      console.log('🔵 useScreenRecorder: screenSource found?', !!screenSource, screenSource);
+      console.log('🔵 useScreenRecorder: screenSource found?', !!foundScreenSource, foundScreenSource);
 
       // If a camera preview window is already open while also capturing the screen,
       // close it to avoid the camera UI being baked into the screen recording.
-      if (cameraSource && screenSource) {
+      if (cameraSource && foundScreenSource) {
         try {
           console.log('🔵 useScreenRecorder: Closing camera preview before screen+camera recording');
           await apiBridge.closeCameraPreview();
@@ -145,7 +177,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       // Open camera preview only when recording camera without a separate screen source.
       // When recording both screen and camera, showing the preview window would cause
       // the camera UI to be baked into the screen recording itself.
-      if (cameraSource && !screenSource) {
+      if (cameraSource && !foundScreenSource) {
         console.log('🔵 useScreenRecorder: Camera source detected! Opening camera preview...');
         console.log('🔵 useScreenRecorder: Camera source details:', {
           id: cameraSource.id,
@@ -175,35 +207,118 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       let mediaStream: MediaStream;
       let screenStream: MediaStream | null = null;
       let cameraStream: MediaStream | null = null;
-      let compositedStream: MediaStream | null = null;
       
-      // Get screen stream if screen source exists
-      if (screenSource) {
-        if (screenSource.id === 'screen:web' || (screenSource.type === 'screen' && !window.electronAPI)) {
+        // Get screen stream if screen source exists
+        if (foundScreenSource) {
+          const screenAudioConfig = (foundScreenSource as any).audioConfig;
+        const shouldCaptureSystemAudio = screenAudioConfig?.mediaEnabled;
+        
+          if (foundScreenSource.id === 'screen:web' || (foundScreenSource.type === 'screen' && !window.electronAPI)) {
           // Web screen sharing using getDisplayMedia
+          // Request system audio if enabled
           screenStream = await navigator.mediaDevices.getDisplayMedia({
             video: {
               width: { ideal: 1920 },
               height: { ideal: 1080 },
               frameRate: { ideal: 60, max: 60 }
             },
-            audio: false
+            audio: shouldCaptureSystemAudio || false
           });
         } else {
           // Desktop recording (Electron only)
           if (!window.electronAPI) {
             throw new Error("Desktop recording is only available in Electron");
           }
-          screenStream = await (navigator.mediaDevices as any).getUserMedia({
-            audio: false,
-            video: {
-              mandatory: {
-                chromeMediaSource: "desktop",
-                chromeMediaSourceId: screenSource.id,
-                frameRate: { ideal: 60, max: 60 }
+          
+          // Try to request audio directly with desktop capture first
+          // Some Electron versions/platforms may support this
+          if (shouldCaptureSystemAudio) {
+            try {
+              console.log('🔵 useScreenRecorder: Attempting to capture system audio with desktop source');
+              screenStream = await (navigator.mediaDevices as any).getUserMedia({
+                audio: {
+                  mandatory: {
+                    chromeMediaSource: "desktop",
+                    chromeMediaSourceId: foundScreenSource.id
+                  }
+                },
+                video: {
+                  mandatory: {
+                    chromeMediaSource: "desktop",
+                    chromeMediaSourceId: foundScreenSource.id,
+                    frameRate: { ideal: 60, max: 60 }
+                  },
+                },
+              });
+              if (screenStream) {
+                console.log('🔵 useScreenRecorder: Desktop capture with audio succeeded, audio tracks:', screenStream.getAudioTracks().length);
+              }
+            } catch (audioError) {
+              console.warn('🔵 useScreenRecorder: Desktop capture with audio failed, trying video only:', audioError);
+              // Fallback: get video only, then try getDisplayMedia for audio
+              screenStream = await (navigator.mediaDevices as any).getUserMedia({
+                audio: false,
+                video: {
+                  mandatory: {
+                    chromeMediaSource: "desktop",
+                    chromeMediaSourceId: foundScreenSource.id,
+                    frameRate: { ideal: 60, max: 60 }
+                  },
+                },
+              });
+              
+              // Try getDisplayMedia for system audio as fallback
+              if (screenStream && shouldCaptureSystemAudio) {
+                const currentScreenStream = screenStream; // Capture for closure
+                try {
+                  console.log('🔵 useScreenRecorder: Attempting getDisplayMedia for system audio');
+                  const systemAudioStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: false,
+                    audio: true
+                  });
+                  const systemAudioTracks = systemAudioStream.getAudioTracks();
+                  console.log('🔵 useScreenRecorder: getDisplayMedia audio tracks:', systemAudioTracks.length);
+                  if (systemAudioTracks.length > 0 && currentScreenStream) {
+                    systemAudioTracks.forEach(track => {
+                      currentScreenStream.addTrack(track);
+                    });
+                    audioTracksRef.current.push(...systemAudioTracks);
+                    globalAudioTracks.push(...systemAudioTracks);
+                    console.log('🔵 useScreenRecorder: Successfully added system audio tracks via getDisplayMedia');
+                  }
+                } catch (displayMediaError) {
+                  console.error('🔵 useScreenRecorder: getDisplayMedia for audio also failed:', displayMediaError);
+                  console.warn('🔵 useScreenRecorder: System audio capture not available. This may be a platform limitation.');
+                }
+              }
+            }
+          } else {
+            // No system audio requested, just get video
+            screenStream = await (navigator.mediaDevices as any).getUserMedia({
+              audio: false,
+              video: {
+                mandatory: {
+                  chromeMediaSource: "desktop",
+                  chromeMediaSourceId: foundScreenSource.id,
+                  frameRate: { ideal: 60, max: 60 }
+                },
               },
-            },
-          });
+            });
+          }
+        }
+        
+        // Store audio tracks from screen stream if system audio was captured
+        // (For web getDisplayMedia, audio tracks are already in the stream)
+        if (screenStream && screenStream.getAudioTracks().length > 0) {
+          // Only add tracks that aren't already tracked (avoid duplicates)
+          const newTracks = screenStream.getAudioTracks().filter(track => 
+            !audioTracksRef.current.some(existing => existing.id === track.id)
+          );
+          if (newTracks.length > 0) {
+            audioTracksRef.current.push(...newTracks);
+            globalAudioTracks.push(...newTracks);
+            console.log('🔵 useScreenRecorder: Added system audio tracks from screen stream:', newTracks.length);
+          }
         }
       }
       
@@ -239,12 +354,21 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         cameraStreamRef.current = cameraStream;
         globalCameraStream = cameraStream;
         
-        // Store audio tracks for stopping during recording
-        audioTracksRef.current = cameraStream.getAudioTracks();
-        globalAudioTracks = [...cameraStream.getAudioTracks()];
+        // Store camera mic audio tracks (append, don't replace, to preserve system audio from screen)
+        const cameraAudioTracks = cameraStream.getAudioTracks();
+        // Only add camera audio tracks that aren't already tracked (avoid duplicates)
+        const newCameraAudioTracks = cameraAudioTracks.filter(track => 
+          !audioTracksRef.current.some(existing => existing.id === track.id)
+        );
+        if (newCameraAudioTracks.length > 0) {
+          audioTracksRef.current.push(...newCameraAudioTracks);
+          globalAudioTracks.push(...newCameraAudioTracks);
+          console.log('🔵 useScreenRecorder: Added camera mic audio tracks:', newCameraAudioTracks.length);
+        }
         
-        // If system audio is enabled, try to get it via getDisplayMedia
-        if (audioConfig?.mediaEnabled) {
+        // If system audio is enabled for camera (only if screen didn't already handle it)
+        // This block is now only for system audio when camera is the primary source for audio
+        if (audioConfig?.mediaEnabled && !foundScreenSource) {
           try {
             const systemAudioStream = await navigator.mediaDevices.getDisplayMedia({
               video: false,
@@ -254,10 +378,17 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
             systemAudioTracks.forEach(track => {
               cameraStream!.addTrack(track);
             });
-            audioTracksRef.current.push(...systemAudioTracks);
-            globalAudioTracks.push(...systemAudioTracks);
+            // Only add system audio tracks that aren't already tracked
+            const newSystemAudioTracks = systemAudioTracks.filter(track => 
+              !audioTracksRef.current.some(existing => existing.id === track.id)
+            );
+            if (newSystemAudioTracks.length > 0) {
+              audioTracksRef.current.push(...newSystemAudioTracks);
+              globalAudioTracks.push(...newSystemAudioTracks);
+              console.log('🔵 useScreenRecorder: Added system audio tracks from camera source:', newSystemAudioTracks.length);
+            }
           } catch (error) {
-            console.warn('Could not capture system audio:', error);
+            console.warn('🔵 useScreenRecorder: Could not capture system audio for camera:', error);
           }
         }
       }
@@ -265,15 +396,104 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       // Choose main recording stream (screen preferred), and attach audio tracks to it.
       if (screenStream && cameraStream) {
         mediaStream = screenStream;
-        // Attach all audio tracks (mic + system) from camera stream to main screen stream
-        cameraStream.getAudioTracks().forEach(track => {
-          mediaStream.addTrack(track);
+        
+        // Log all audio tracks before combining
+        console.log('🔵 useScreenRecorder: Before combining - screenStream audio tracks:', screenStream.getAudioTracks().map(t => ({ id: t.id, label: t.label, enabled: t.enabled, muted: t.muted })));
+        console.log('🔵 useScreenRecorder: Before combining - cameraStream audio tracks:', cameraStream.getAudioTracks().map(t => ({ id: t.id, label: t.label, enabled: t.enabled, muted: t.muted })));
+        
+        // Collect all audio tracks from both streams
+        const allAudioTracks: MediaStreamTrack[] = [];
+        
+        // Add system audio tracks from screen stream
+        screenStream.getAudioTracks().forEach(track => {
+          allAudioTracks.push(track);
+          console.log('🔵 useScreenRecorder: Adding system audio track from screen:', track.id, track.label);
         });
-      } else if (cameraSource && !screenSource) {
+        
+        // Add mic audio tracks from camera stream (avoid duplicates)
+        cameraStream.getAudioTracks().forEach(track => {
+          const isDuplicate = screenStream.getAudioTracks().some(screenTrack => screenTrack.id === track.id);
+          if (!isDuplicate) {
+            allAudioTracks.push(track);
+            console.log('🔵 useScreenRecorder: Adding camera mic track:', track.id, track.label);
+          } else {
+            console.log('🔵 useScreenRecorder: Skipping duplicate track:', track.id);
+          }
+        });
+        
+        // If we have multiple audio tracks, we need to mix them using AudioContext
+        // because MediaRecorder typically only records one audio track
+        if (allAudioTracks.length > 1) {
+          console.log('🔵 useScreenRecorder: Multiple audio tracks detected, creating mixed audio track');
+          
+          // Remove all existing audio tracks from mediaStream
+          mediaStream.getAudioTracks().forEach(track => {
+            mediaStream.removeTrack(track);
+          });
+          
+          // Create AudioContext to mix audio tracks
+          const audioContext = new AudioContext();
+          audioContextRef.current = audioContext; // Store for cleanup
+          
+          // Resume AudioContext if suspended (required by some browsers)
+          if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+          }
+          
+          const destination = audioContext.createMediaStreamDestination();
+          
+          // Connect all audio tracks to the destination (mixing them)
+          allAudioTracks.forEach(track => {
+            if (track.enabled && track.readyState === 'live') {
+              try {
+                const source = audioContext.createMediaStreamSource(new MediaStream([track]));
+                source.connect(destination);
+                console.log('🔵 useScreenRecorder: Connected audio track to mixer:', track.id, track.label);
+              } catch (error) {
+                console.error('🔵 useScreenRecorder: Failed to connect audio track:', track.id, error);
+              }
+            }
+          });
+          
+          // Add the mixed audio track to the mediaStream
+          const mixedAudioTrack = destination.stream.getAudioTracks()[0];
+          if (mixedAudioTrack) {
+            mediaStream.addTrack(mixedAudioTrack);
+            console.log('🔵 useScreenRecorder: Added mixed audio track to stream:', mixedAudioTrack.id);
+          } else {
+            console.warn('🔵 useScreenRecorder: Failed to create mixed audio track, adding tracks individually');
+            // Fallback: add tracks individually
+            allAudioTracks.forEach(track => {
+              track.enabled = true;
+              mediaStream.addTrack(track);
+            });
+            // Clean up AudioContext if we're not using it
+            if (audioContextRef.current) {
+              await audioContextRef.current.close();
+              audioContextRef.current = null;
+            }
+          }
+        } else if (allAudioTracks.length === 1) {
+          // Only one audio track, just ensure it's in the stream
+          const existingTrack = mediaStream.getAudioTracks().find(t => t.id === allAudioTracks[0].id);
+          if (!existingTrack) {
+            allAudioTracks[0].enabled = true;
+            mediaStream.addTrack(allAudioTracks[0]);
+          }
+        }
+        
+        // Ensure all existing tracks in mediaStream are enabled
+        mediaStream.getAudioTracks().forEach(track => {
+          track.enabled = true;
+        });
+        
+        console.log('🔵 useScreenRecorder: After combining - total audio tracks:', mediaStream.getAudioTracks().length);
+        console.log('🔵 useScreenRecorder: Final audio tracks:', mediaStream.getAudioTracks().map(t => ({ id: t.id, label: t.label, enabled: t.enabled, muted: t.muted })));
+      } else if (cameraSource && !foundScreenSource) {
         // Camera only - use camera stream directly
         mediaStream = cameraStream!;
-      } else if (screenSource && !cameraSource) {
-        // Screen only - use screen stream directly
+      } else if (foundScreenSource && !cameraSource) {
+        // Screen only - use screen stream directly (may already have system audio if mediaEnabled was true)
         mediaStream = screenStream!;
       } else {
         // Fallback: use first source (backward compatibility)
@@ -349,6 +569,33 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       }
       chunks.current = [];
       cameraChunks.current = [];
+      
+      // Ensure all audio tracks are enabled and active before recording
+      stream.current.getAudioTracks().forEach(track => {
+        if (!track.enabled) {
+          console.log('🔵 useScreenRecorder: Enabling audio track:', track.id);
+          track.enabled = true;
+        }
+        if (track.muted) {
+          console.log('🔵 useScreenRecorder: Audio track is muted (read-only):', track.id);
+        }
+      });
+      
+      // Log all tracks in the final stream before creating MediaRecorder
+      console.log('🔵 useScreenRecorder: Final stream before MediaRecorder - video tracks:', stream.current.getVideoTracks().length);
+      console.log('🔵 useScreenRecorder: Final stream before MediaRecorder - audio tracks:', stream.current.getAudioTracks().length);
+      stream.current.getAudioTracks().forEach((track, index) => {
+        console.log(`🔵 useScreenRecorder: Audio track ${index}:`, {
+          id: track.id,
+          label: track.label,
+          enabled: track.enabled,
+          muted: track.muted,
+          readyState: track.readyState,
+          kind: track.kind,
+          settings: track.getSettings()
+        });
+      });
+      
       // Check if stream has audio tracks
       const hasAudio = stream.current.getAudioTracks().length > 0;
       
@@ -436,7 +683,23 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       recorder.start(5000);
       startTime.current = Date.now();
       setRecording(true);
-      await apiBridge.setRecordingState(true);
+      
+      // Check if auto-zoom is enabled for screen recording
+      const foundScreenSourceForZoom = sources.find(s => 
+        s.type === 'screen' || s.id?.startsWith('screen:') || s.id?.startsWith('window:')
+      );
+      const autoZoomEnabled = foundScreenSourceForZoom?.autoZoomEnabled || false;
+      await apiBridge.setRecordingState(true, autoZoomEnabled);
+      
+      // Set up click detection if auto-zoom is enabled
+      if (autoZoomEnabled && typeof window !== 'undefined' && window.electronAPI) {
+        console.log('🔵 useScreenRecorder: Auto-zoom enabled, setting up click detection');
+        const cleanup = setupAutoZoomClickDetection();
+        autoZoomCleanupRef.current = cleanup;
+        console.log('🔵 useScreenRecorder: Click detection setup complete');
+      } else {
+        console.log('🔵 useScreenRecorder: Auto-zoom not enabled or electronAPI not available', { autoZoomEnabled, hasElectronAPI: typeof window !== 'undefined' && !!window.electronAPI });
+      }
     } catch (error) {
       console.error('Failed to start recording:', error);
       setRecording(false);
@@ -445,6 +708,74 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         stream.current = null;
       }
     }
+  };
+
+  const setupAutoZoomClickDetection = () => {
+    console.log('🔵 useScreenRecorder: Setting up auto-zoom click detection');
+    
+    // Initialize auto-zoom events array in localStorage (shared across windows)
+    localStorage.setItem('autoZoomEvents', JSON.stringify([]));
+    console.log('🔵 useScreenRecorder: Initialized autoZoomEvents in localStorage');
+    
+    // Listen for click events from Electron main process
+    const handleClickEvent = (_event: any, data: { x: number; y: number; timestamp: number }) => {
+      console.log('🔵 useScreenRecorder: Received auto-zoom click event:', data);
+      const recordingStartTime = startTime.current;
+      // Use the timestamp from data (which is already relative to recording start from main process)
+      // If not provided, calculate relative time
+      const relativeTime = data.timestamp || (Date.now() - recordingStartTime);
+      
+      // Store zoom event in localStorage (shared across windows)
+      const eventsStr = localStorage.getItem('autoZoomEvents') || '[]';
+      const events = JSON.parse(eventsStr);
+      events.push({
+        x: data.x,
+        y: data.y,
+        timestamp: relativeTime, // Relative to recording start in milliseconds
+      });
+      localStorage.setItem('autoZoomEvents', JSON.stringify(events));
+      
+      console.log('🔵 useScreenRecorder: Auto-zoom click stored:', { x: data.x, y: data.y, time: relativeTime, totalEvents: events.length });
+      console.log('🔵 useScreenRecorder: All events in localStorage:', JSON.stringify(events));
+    };
+    
+    // Set up IPC listener if in Electron
+    const electronAPI = window.electronAPI as any;
+    if (typeof window !== 'undefined' && electronAPI?.on) {
+      console.log('🔵 useScreenRecorder: Registering IPC listener for auto-zoom-click-event');
+      console.log('🔵 useScreenRecorder: electronAPI.on exists?', !!electronAPI.on);
+      console.log('🔵 useScreenRecorder: handleClickEvent function:', typeof handleClickEvent);
+      
+      try {
+        // Register the listener
+        electronAPI.on('auto-zoom-click-event', handleClickEvent);
+        console.log('🔵 useScreenRecorder: IPC listener registered successfully');
+        
+        // Verify localStorage is initialized
+        const testEvents = localStorage.getItem('autoZoomEvents');
+        console.log('🔵 useScreenRecorder: Current autoZoomEvents in localStorage:', testEvents);
+      } catch (error) {
+        console.error('🔵 useScreenRecorder: Error registering IPC listener:', error);
+      }
+    } else {
+      console.warn('🔵 useScreenRecorder: Cannot register IPC listener - window.electronAPI?.on not available', {
+        hasWindow: typeof window !== 'undefined',
+        hasElectronAPI: !!window.electronAPI,
+        hasOn: !!(window.electronAPI as any)?.on
+      });
+    }
+    
+    // Return cleanup function
+    return () => {
+      if (typeof window !== 'undefined' && electronAPI?.off) {
+        console.log('🔵 useScreenRecorder: Cleaning up auto-zoom click detection listener');
+        try {
+          electronAPI.off('auto-zoom-click-event', handleClickEvent);
+        } catch (error) {
+          console.error('🔵 useScreenRecorder: Error removing IPC listener:', error);
+        }
+      }
+    };
   };
 
   const toggleRecording = async () => {

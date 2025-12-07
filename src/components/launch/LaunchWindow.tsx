@@ -235,11 +235,11 @@ export function LaunchWindow() {
           variant="link"
           size="sm"
           className={`gap-1 bg-transparent hover:bg-transparent px-0 flex-1 text-left text-xs ${styles.electronNoDrag} ${
-            hasScreen ? 'text-[#34B27B]' : 'text-white'
+            hasScreen ? 'text-[#DA1F26]' : 'text-white'
           }`}
           onClick={openSourceSelector}
         >
-          <MdMonitor size={14} className={hasScreen ? "text-[#34B27B]" : "text-white"} />
+          <MdMonitor size={14} className={hasScreen ? "text-[#DA1F26]" : "text-white"} />
           {hasScreen ? truncateText(selectedSource, 6) : "Screen"}
         </Button>
 
@@ -250,11 +250,11 @@ export function LaunchWindow() {
             variant="link"
             size="sm"
             className={`gap-1 bg-transparent hover:bg-transparent px-0 flex-1 text-left text-xs ${styles.electronNoDrag} ${
-              hasCamera ? 'text-[#34B27B]' : 'text-white'
+              hasCamera ? 'text-[#DA1F26]' : 'text-white'
             }`}
             onClick={openCameraSelector}
           >
-            <MdVideocam size={14} className={hasCamera ? "text-[#34B27B]" : "text-white"} />
+            <MdVideocam size={14} className={hasCamera ? "text-[#DA1F26]" : "text-white"} />
             Devices
           </Button>
           {hasCamera && recording && (

@@ -217,15 +217,15 @@ export class VideoExporter {
             }
             
             // For circle, make it square; for others, maintain aspect ratio
-            // Use cameraSize from config (default 250px) to match editor
-            const cameraSize = this.config.cameraSize || 250;
+            // Use cameraSize from config (default 150px) to match editor
+            const cameraSize = this.config.cameraSize || 150;
             const baseSize = Math.min(cw * (cameraSize / 1920), cameraSize); // Scale based on canvas width, but cap at cameraSize
             const isCircle = shape === 'circle';
             const overlayWidth = baseSize;
             const overlayHeight = isCircle ? baseSize : (cameraVideoElement.videoHeight / cameraVideoElement.videoWidth) * baseSize;
             
-            // Get camera position from config (default bottom-right: 100%, 100%)
-            const cameraPos = this.config.cameraPosition || { x: 100, y: 100 };
+            // Get camera position from config (default bottom-right: 92%, 92% to keep camera fully visible)
+            const cameraPos = this.config.cameraPosition || { x: 92, y: 92 };
             // Convert percentage to pixel position (x: 0-100%, y: 0-100%)
             // Position is centered on the point, so adjust by half the overlay size
             const x = (cameraPos.x / 100) * cw - overlayWidth / 2;

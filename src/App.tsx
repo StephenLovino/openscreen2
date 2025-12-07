@@ -40,12 +40,12 @@ export default function App() {
       return (
         <div className="w-full h-full bg-background text-foreground flex items-center justify-center">
           <div className="text-center space-y-4">
-            <h1 className="text-2xl font-bold">OpenScreen</h1>
+            <h1 className="text-2xl font-bold">AHA Clips</h1>
             <p className="text-muted-foreground">Web Version</p>
             <div className="space-y-2">
               <a 
                 href="/?windowType=source-selector" 
-                className="block px-4 py-2 bg-[#34B27B] text-white rounded hover:bg-[#34B27B]/80"
+                className="block px-4 py-2 bg-[#DA1F26] text-white rounded hover:bg-[#DA1F26]/80"
               >
                 Select Source & Record
               </a>

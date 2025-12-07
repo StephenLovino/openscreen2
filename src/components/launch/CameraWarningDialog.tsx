@@ -1,8 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { Button } from "../ui/button";
-import { apiBridge } from "../../lib/apiBridge";
 
 export function CameraWarningDialog() {
+  const handleContinue = useCallback(() => {
+    if (window.electronAPI?.send) {
+      window.electronAPI.send('camera-warning-dialog-response', { action: 'continue' });
+    }
+  }, []);
+
   useEffect(() => {
     // Make background transparent
     document.body.style.background = 'transparent';
@@ -14,53 +19,36 @@ export function CameraWarningDialog() {
       root.style.setProperty('margin', '0');
       root.style.setProperty('max-width', 'none');
     }
-  }, []);
 
-  const handleContinue = () => {
-    if (window.electronAPI?.send) {
-      window.electronAPI.send('camera-warning-dialog-response', { action: 'continue' });
-    }
-  };
-
-  const handleCancel = () => {
-    if (window.electronAPI?.send) {
-      window.electronAPI.send('camera-warning-dialog-response', { action: 'cancel' });
-    }
-  };
+    // Close dialog on ESC key (treat as continue)
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        handleContinue();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleContinue]);
 
   return (
-    <div className="w-full h-full flex items-center justify-center bg-transparent">
-      <div
-        className="w-full max-w-md mx-4 rounded-2xl border border-white/20 shadow-2xl"
-        style={{
-          background: 'linear-gradient(135deg, rgba(30,30,40,0.98) 0%, rgba(20,20,30,0.95) 100%)',
-          backdropFilter: 'blur(24px) saturate(180%)',
-          WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-        }}
-      >
-        <div className="p-6 space-y-4">
-          <div className="space-y-2">
-            <h2 className="text-xl font-semibold text-white">
+    <div className="w-full h-full flex items-center justify-center" style={{ background: 'transparent' }}>
+      <div className="w-full max-w-md mx-4 rounded-2xl bg-zinc-900 border border-zinc-700 shadow-2xl">
+        <div className="p-8 space-y-6">
+          <div className="space-y-3">
+            <h2 className="text-2xl font-semibold text-white leading-tight">
               Camera Preview Will Be Hidden
             </h2>
-            <p className="text-sm text-white/70 leading-relaxed">
+            <p className="text-base text-white/90 leading-relaxed">
               We will remove the camera preview when recording to prevent it from being part of the screen record. You can always turn it on or off during edit.
             </p>
           </div>
           
-          <div className="flex gap-3 pt-2">
-            <Button
-              variant="outline"
-              onClick={handleCancel}
-              className="flex-1 border-white/20 text-white/80 hover:text-white hover:bg-white/10"
-            >
-              Cancel
-            </Button>
+          <div className="flex justify-end pt-2">
             <Button
               onClick={handleContinue}
-              className="flex-1 bg-[#34B27B] hover:bg-[#2a9d6a] text-white"
+              className="px-8 py-2.5 bg-[#DA1F26] hover:bg-[#b81a20] text-white font-medium text-base shadow-lg shadow-[#DA1F26]/20 transition-all"
             >
-              Continue
+              Got it
             </Button>
           </div>
         </div>
