@@ -58,6 +58,10 @@ export default function VideoEditor() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportResolution, setExportResolution] = useState<'480p' | '720p' | '1080p' | '2k' | '4k'>('1080p');
   const [exportFormat, setExportFormat] = useState<'mp4' | 'gif'>('mp4');
+  const [exportBitrate, setExportBitrate] = useState<number | null>(null); // null = auto
+  const [exportFrameRate, setExportFrameRate] = useState<number | null>(null); // null = auto (60 for video, 30 for GIF)
+  const [hardwareAcceleration, setHardwareAcceleration] = useState<boolean | null>(null); // null = unknown
+  const [exportPlatform, setExportPlatform] = useState<'custom' | 'facebook' | 'helpscout'>('custom');
 
   const videoPlaybackRef = useRef<VideoPlaybackRef>(null);
   const nextZoomIdRef = useRef(1);
@@ -254,6 +258,9 @@ export default function VideoEditor() {
     trimRegions,
     exportResolution,
     exportFormat,
+    exportBitrate,
+    exportFrameRate,
+    exportPlatform,
   });
 
   // Update refs when state changes
@@ -276,6 +283,8 @@ export default function VideoEditor() {
       trimRegions,
       exportResolution,
       exportFormat,
+      exportBitrate,
+      exportFrameRate,
     };
   }, [
     videoPath,
@@ -295,6 +304,9 @@ export default function VideoEditor() {
     trimRegions,
     exportResolution,
     exportFormat,
+    exportBitrate,
+    exportFrameRate,
+    exportPlatform,
   ]);
 
   // Handle menu actions - only set up once, handlers read from refs
@@ -328,6 +340,9 @@ export default function VideoEditor() {
           trimRegions: state.trimRegions,
           exportResolution: state.exportResolution,
           exportFormat: state.exportFormat,
+          exportBitrate: state.exportBitrate,
+          exportFrameRate: state.exportFrameRate,
+          exportPlatform: state.exportPlatform,
           timestamp: new Date().toISOString(),
         };
 
@@ -452,6 +467,15 @@ export default function VideoEditor() {
         }
         if (projectData.exportFormat) {
           setExportFormat(projectData.exportFormat);
+        }
+        if (projectData.exportBitrate !== undefined) {
+          setExportBitrate(projectData.exportBitrate);
+        }
+        if (projectData.exportFrameRate !== undefined) {
+          setExportFrameRate(projectData.exportFrameRate);
+        }
+        if (projectData.exportPlatform) {
+          setExportPlatform(projectData.exportPlatform);
         }
 
         toast.success('Project loaded successfully', {
@@ -670,6 +694,7 @@ export default function VideoEditor() {
     setIsExporting(true);
     setExportProgress(null);
     setExportError(null);
+    setHardwareAcceleration(null); // Reset until we know the status
 
     try {
       const wasPlaying = isPlaying;
@@ -708,14 +733,20 @@ export default function VideoEditor() {
       exportWidth = Math.round(exportWidth / 2) * 2;
       exportHeight = Math.round(exportHeight / 2) * 2;
 
-      // Calculate visually lossless bitrate matching screen recording optimization
+      // Calculate bitrate - use custom if set, otherwise auto-calculate
       const totalPixels = exportWidth * exportHeight;
-      let bitrate = 30_000_000;
-      if (totalPixels > 1920 * 1080 && totalPixels <= 2560 * 1440) {
-        bitrate = 50_000_000;
-      } else if (totalPixels > 2560 * 1440) {
-        bitrate = 80_000_000;
+      let bitrate = exportBitrate || 30_000_000;
+      if (!exportBitrate) {
+        // Auto-calculate based on resolution
+        if (totalPixels > 1920 * 1080 && totalPixels <= 2560 * 1440) {
+          bitrate = 50_000_000;
+        } else if (totalPixels > 2560 * 1440) {
+          bitrate = 80_000_000;
+        }
       }
+      
+      // Use custom frame rate if set, otherwise default (60 for video, 30 for GIF)
+      const frameRate = exportFrameRate || (exportFormat === 'gif' ? 30 : 60);
 
       let result: ExportResult;
       let fileName: string;
@@ -733,7 +764,7 @@ export default function VideoEditor() {
           cameraShape: cameraShape,
           width: exportWidth,
           height: exportHeight,
-          frameRate: 30, // GIFs typically use lower frame rate
+          frameRate: frameRate,
           wallpaper,
           zoomRegions,
           trimRegions,
@@ -765,7 +796,7 @@ export default function VideoEditor() {
           cameraShape: cameraShape,
           width: exportWidth,
           height: exportHeight,
-          frameRate: 60,
+          frameRate: frameRate,
           bitrate,
           codec: 'avc1.640033',
           wallpaper,
@@ -785,6 +816,10 @@ export default function VideoEditor() {
 
         exporterRef.current = exporter;
         result = await exporter.export();
+        // Check hardware acceleration status after export (encoder is initialized during export)
+        if (exporter && 'hardwareAcceleration' in exporter) {
+          setHardwareAcceleration((exporter as any).hardwareAcceleration);
+        }
         fileName = `export-${timestamp}.mp4`;
       }
 
@@ -989,6 +1024,15 @@ export default function VideoEditor() {
           onExportResolutionChange={setExportResolution}
           exportFormat={exportFormat}
           onExportFormatChange={setExportFormat}
+          exportBitrate={exportBitrate}
+          onExportBitrateChange={setExportBitrate}
+          exportFrameRate={exportFrameRate}
+          onExportFrameRateChange={setExportFrameRate}
+          hardwareAcceleration={hardwareAcceleration}
+          exportPlatform={exportPlatform}
+          onExportPlatformChange={setExportPlatform}
+          videoDuration={duration}
+          trimRegions={trimRegions}
         />
       </div>
 

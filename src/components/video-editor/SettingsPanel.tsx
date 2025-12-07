@@ -75,6 +75,15 @@ interface SettingsPanelProps {
   onExportResolutionChange?: (resolution: '480p' | '720p' | '1080p' | '2k' | '4k') => void;
   exportFormat?: 'mp4' | 'gif';
   onExportFormatChange?: (format: 'mp4' | 'gif') => void;
+  exportBitrate?: number | null;
+  onExportBitrateChange?: (bitrate: number | null) => void;
+  exportFrameRate?: number | null;
+  onExportFrameRateChange?: (frameRate: number | null) => void;
+  hardwareAcceleration?: boolean | null;
+  exportPlatform?: 'custom' | 'facebook' | 'helpscout';
+  onExportPlatformChange?: (platform: 'custom' | 'facebook' | 'helpscout') => void;
+  videoDuration?: number; // in seconds, for size estimation
+  trimRegions?: Array<{ startMs: number; endMs: number }>; // for effective duration calculation
 }
 
 export default SettingsPanel;
@@ -88,10 +97,139 @@ const ZOOM_DEPTH_OPTIONS: Array<{ depth: ZoomDepth; label: string }> = [
   { depth: 6, label: "5×" },
 ];
 
-export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, onZoomDepthChange, selectedZoomId, onZoomDelete, shadowIntensity = 0, onShadowChange, showBlur, onBlurChange, motionBlurEnabled = true, onMotionBlurChange, borderRadius = 0, onBorderRadiusChange, padding = 50, onPaddingChange, cropRegion, onCropChange, hideCamera = false, onHideCameraChange, cameraShape = 'squircle', onCameraShapeChange, cameraSize = 150, onCameraSizeChange, videoElement, onExport, exportResolution = '1080p', onExportResolutionChange, exportFormat = 'mp4', onExportFormatChange }: SettingsPanelProps) {
+export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, onZoomDepthChange, selectedZoomId, onZoomDelete, shadowIntensity = 0, onShadowChange, showBlur, onBlurChange, motionBlurEnabled = true, onMotionBlurChange, borderRadius = 0, onBorderRadiusChange, padding = 50, onPaddingChange, cropRegion, onCropChange, hideCamera = false, onHideCameraChange, cameraShape = 'squircle', onCameraShapeChange, cameraSize = 150, onCameraSizeChange, videoElement, onExport, exportResolution = '1080p', onExportResolutionChange, exportFormat = 'mp4', onExportFormatChange, exportBitrate = null, onExportBitrateChange, exportFrameRate = null, onExportFrameRateChange, hardwareAcceleration = null, exportPlatform = 'custom', onExportPlatformChange, videoDuration = 0, trimRegions = [] }: SettingsPanelProps) {
   const [wallpaperPaths, setWallpaperPaths] = useState<string[]>([]);
   const [customImages, setCustomImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Calculate effective duration (excluding trim regions)
+  const getEffectiveDuration = (): number => {
+    if (!videoDuration) return 0;
+    const totalTrimDuration = trimRegions.reduce((sum, region) => {
+      return sum + (region.endMs - region.startMs) / 1000;
+    }, 0);
+    return videoDuration - totalTrimDuration;
+  };
+
+  // Get resolution dimensions
+  const getResolutionDimensions = (resolution: '480p' | '720p' | '1080p' | '2k' | '4k'): { width: number; height: number } => {
+    switch (resolution) {
+      case '480p':
+        return { width: 854, height: 480 };
+      case '720p':
+        return { width: 1280, height: 720 };
+      case '1080p':
+        return { width: 1920, height: 1080 };
+      case '2k':
+        return { width: 2560, height: 1440 };
+      case '4k':
+        return { width: 3840, height: 2160 };
+    }
+  };
+
+  // Estimate file size in bytes
+  const estimateFileSize = (): number => {
+    const effectiveDuration = getEffectiveDuration();
+    if (effectiveDuration <= 0) return 0;
+
+    if (exportFormat === 'gif') {
+      // GIF size estimation: roughly 1-5 KB per frame depending on complexity
+      // Use a conservative estimate of 2 KB per frame
+      const fps = exportFrameRate || 30;
+      const totalFrames = Math.ceil(effectiveDuration * fps);
+      const estimatedSizeBytes = totalFrames * 2 * 1024; // 2 KB per frame
+      return estimatedSizeBytes;
+    } else {
+      // Video size estimation: bitrate * duration
+      const res = getResolutionDimensions(exportResolution);
+      const totalPixels = res.width * res.height;
+      
+      // Get bitrate (in bps)
+      let bitrateBps = exportBitrate || 30_000_000;
+      if (!exportBitrate) {
+        // Auto-calculated bitrate
+        if (totalPixels > 1920 * 1080 && totalPixels <= 2560 * 1440) {
+          bitrateBps = 50_000_000;
+        } else if (totalPixels > 2560 * 1440) {
+          bitrateBps = 80_000_000;
+        }
+      }
+
+      // Estimate: bitrate (bits/sec) * duration (sec) / 8 = bytes
+      // Add 10% overhead for container/audio
+      const estimatedSizeBytes = (bitrateBps * effectiveDuration / 8) * 1.1;
+      return estimatedSizeBytes;
+    }
+  };
+
+  // Platform size limits (in bytes)
+  const PLATFORM_LIMITS: Record<string, number> = {
+    facebook: 25 * 1024 * 1024, // 25 MB
+    helpscout: 10 * 1024 * 1024, // 10 MB
+  };
+
+  // Auto-configure settings based on platform - maximize quality within limit
+  useEffect(() => {
+    if (exportPlatform === 'custom' || !onExportResolutionChange || !onExportBitrateChange || !onExportFrameRateChange) {
+      return;
+    }
+
+    const limit = PLATFORM_LIMITS[exportPlatform];
+    if (!limit) return;
+
+    const effectiveDuration = getEffectiveDuration();
+    if (effectiveDuration <= 0) return;
+
+    // Target 98% of limit to maximize quality while staying safely under
+    const targetSizeBytes = limit * 0.98;
+
+    // Try resolutions from highest to lowest quality
+    const resolutions: Array<'1080p' | '720p' | '480p'> = ['1080p', '720p', '480p'];
+    const fpsOptions = [60, 30, 25]; // Try higher FPS first for better quality
+
+    // Find the best configuration that maximizes quality
+    for (const resolution of resolutions) {
+      for (const fps of fpsOptions) {
+        // Calculate required bitrate to hit target size
+        // size = (bitrate * duration / 8) * 1.1
+        // bitrate = (size * 8) / (duration * 1.1)
+        const requiredBitrate = (targetSizeBytes * 8) / (effectiveDuration * 1.1);
+        
+        // Define reasonable bitrate ranges per resolution
+        const bitrateRanges: Record<string, { min: number; max: number }> = {
+          '1080p': { min: 5_000_000, max: 50_000_000 }, // 5-50 Mbps
+          '720p': { min: 3_000_000, max: 25_000_000 },  // 3-25 Mbps
+          '480p': { min: 2_000_000, max: 15_000_000 },  // 2-15 Mbps
+        };
+
+        const range = bitrateRanges[resolution];
+        const optimalBitrate = Math.max(range.min, Math.min(range.max, requiredBitrate));
+
+        // Test if this configuration fits
+        const testSize = (optimalBitrate * effectiveDuration / 8) * 1.1;
+        
+        if (testSize <= limit) {
+          // This configuration fits! Use it (highest quality that fits)
+          onExportResolutionChange(resolution);
+          onExportFrameRateChange(fps);
+          onExportBitrateChange(Math.round(optimalBitrate));
+          return;
+        }
+      }
+    }
+
+    // Fallback: if nothing fits, use the most conservative settings
+    // This should rarely happen, but handle edge cases
+    onExportResolutionChange('480p');
+    onExportFrameRateChange(25);
+    const fallbackBitrate = Math.max(2_000_000, (targetSizeBytes * 8) / (effectiveDuration * 1.1));
+    onExportBitrateChange(Math.round(Math.min(15_000_000, fallbackBitrate)));
+  }, [exportPlatform, videoDuration, trimRegions, exportFormat]);
+
+  const estimatedSize = estimateFileSize();
+  const platformLimit = exportPlatform !== 'custom' ? PLATFORM_LIMITS[exportPlatform] : null;
+  const exceedsLimit = platformLimit && estimatedSize > platformLimit;
+  const effectiveDuration = getEffectiveDuration();
 
   useEffect(() => {
     let mounted = true
@@ -582,6 +720,30 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
       </Tabs>
 
       <div className="mt-6 pt-6 border-t border-white/5 space-y-4">
+        {/* Platform Preset */}
+        {onExportPlatformChange && (
+          <div className="mb-4">
+            <div className="text-xs font-medium text-slate-200 mb-3">Platform Preset</div>
+            <div className="grid grid-cols-3 gap-2">
+              {(['custom', 'facebook', 'helpscout'] as const).map((platform) => (
+                <Button
+                  key={platform}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onExportPlatformChange(platform)}
+                  className={`flex-1 text-xs ${
+                    exportPlatform === platform
+                      ? "border-[#DA1F26] bg-[#DA1F26] text-white shadow-[#DA1F26]/20 scale-105 ring-2 ring-[#DA1F26]/20"
+                      : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"
+                  }`}
+                >
+                  {platform === 'custom' ? 'Custom' : platform === 'facebook' ? 'Facebook' : 'HelpScout'}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Export Resolution */}
         {onExportResolutionChange && (
           <div className="mb-4">
@@ -635,6 +797,147 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
               >
                 GIF
               </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Bitrate Control (only for video) */}
+        {exportFormat === 'mp4' && onExportBitrateChange && (
+          <div className="mb-4">
+            <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-slate-200">Bitrate</div>
+                <div className="flex items-center gap-2">
+                  {exportBitrate === null ? (
+                    <span className="text-[10px] text-slate-400">Auto</span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-mono">{(exportBitrate / 1_000_000).toFixed(1)} Mbps</span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onExportBitrateChange(null)}
+                    className="h-5 px-2 text-[10px] text-slate-400 hover:text-slate-200"
+                  >
+                    Reset
+                  </Button>
+                </div>
+              </div>
+              <Slider
+                value={[exportBitrate ? exportBitrate / 1_000_000 : 30]}
+                onValueChange={(values) => onExportBitrateChange(values[0] * 1_000_000)}
+                min={5}
+                max={100}
+                step={1}
+                className="w-full [&_[role=slider]]:bg-[#DA1F26] [&_[role=slider]]:border-[#DA1F26]"
+              />
+              <div className="text-[10px] text-slate-500 text-center">5-100 Mbps (Auto recommended)</div>
+            </div>
+          </div>
+        )}
+
+        {/* Frame Rate Control */}
+        {onExportFrameRateChange && (
+          <div className="mb-4">
+            <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-slate-200">Frame Rate (FPS)</div>
+                <div className="flex items-center gap-2">
+                  {exportFrameRate === null ? (
+                    <span className="text-[10px] text-slate-400">Auto</span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-mono">{exportFrameRate} fps</span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onExportFrameRateChange(null)}
+                    className="h-5 px-2 text-[10px] text-slate-400 hover:text-slate-200"
+                  >
+                    Reset
+                  </Button>
+                </div>
+              </div>
+              <Slider
+                value={[exportFrameRate || (exportFormat === 'gif' ? 30 : 60)]}
+                onValueChange={(values) => onExportFrameRateChange(values[0])}
+                min={15}
+                max={60}
+                step={1}
+                className="w-full [&_[role=slider]]:bg-[#DA1F26] [&_[role=slider]]:border-[#DA1F26]"
+              />
+              <div className="text-[10px] text-slate-500 text-center">
+                {exportFormat === 'gif' ? '15-30 fps (30 recommended for GIF)' : '15-60 fps (60 recommended for video)'}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Hardware Acceleration Status */}
+        {exportFormat === 'mp4' && hardwareAcceleration !== null && (
+          <div className="mb-4">
+            <div className="p-3 rounded-xl bg-white/5 border border-white/5">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-slate-200">Hardware Acceleration</div>
+                <div className="flex items-center gap-2">
+                  {hardwareAcceleration ? (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                      <span className="text-[10px] text-green-400 font-medium">GPU</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
+                      <span className="text-[10px] text-yellow-400 font-medium">CPU</span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="text-[10px] text-slate-500 mt-1">
+                {hardwareAcceleration 
+                  ? 'Using GPU encoding for faster export' 
+                  : 'Using CPU encoding (GPU not available)'}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Estimated File Size */}
+        {videoDuration > 0 && (
+          <div className="mb-4">
+            <div className={`p-3 rounded-xl border ${
+              exceedsLimit 
+                ? 'bg-yellow-500/10 border-yellow-500/30' 
+                : 'bg-white/5 border-white/5'
+            }`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-medium text-slate-200">Estimated File Size</div>
+                <div className={`text-[10px] font-mono ${
+                  exceedsLimit ? 'text-yellow-400' : 'text-slate-400'
+                }`}>
+                  {(estimatedSize / (1024 * 1024)).toFixed(2)} MB
+                </div>
+              </div>
+              {platformLimit && (
+                <div className="text-[10px] text-slate-500 mb-2">
+                  {exportPlatform === 'facebook' ? 'Facebook' : 'HelpScout'} limit: {(platformLimit / (1024 * 1024)).toFixed(0)} MB
+                </div>
+              )}
+              {exceedsLimit && (
+                <div className="mt-2 p-2 rounded bg-yellow-500/20 border border-yellow-500/30">
+                  <div className="text-[10px] text-yellow-400 font-medium mb-1">
+                    ⚠️ File size exceeds platform limit
+                  </div>
+                  <div className="text-[10px] text-yellow-300/80">
+                    Consider trimming the video to reduce duration, or lower the resolution/bitrate further.
+                  </div>
+                </div>
+              )}
+              {!exceedsLimit && platformLimit && (
+                <div className="text-[10px] text-green-400">
+                  ✓ File size is within platform limit
+                </div>
+              )}
             </div>
           </div>
         )}

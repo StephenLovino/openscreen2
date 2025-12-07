@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { X, Download, Loader2 } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { X, Download, Loader2, Bell, BellOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import type { ExportProgress } from '@/lib/exporter';
 
 interface ExportDialogProps {
@@ -23,6 +24,117 @@ export function ExportDialog({
   onCancel,
 }: ExportDialogProps) {
   const [showSuccess, setShowSuccess] = useState(false);
+  const [soundNotification, setSoundNotification] = useState(() => {
+    // Load from localStorage, default to true
+    const saved = localStorage.getItem('exportSoundNotification');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [estimatedFinishTime, setEstimatedFinishTime] = useState<Date | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+  const lastProgressRef = useRef<number>(0);
+  const lastUpdateTimeRef = useRef<number>(Date.now());
+
+  // Save sound notification preference
+  useEffect(() => {
+    localStorage.setItem('exportSoundNotification', String(soundNotification));
+  }, [soundNotification]);
+
+  // Calculate estimated finish time
+  useEffect(() => {
+    if (isExporting && progress && progress.percentage > 0) {
+      const now = Date.now();
+      
+      // Initialize start time on first progress
+      if (startTimeRef.current === null) {
+        startTimeRef.current = now;
+        lastProgressRef.current = progress.percentage;
+        lastUpdateTimeRef.current = now;
+        return;
+      }
+
+      // Update estimate every second or when progress changes significantly
+      const timeSinceLastUpdate = (now - lastUpdateTimeRef.current) / 1000;
+      const progressDelta = progress.percentage - lastProgressRef.current;
+      
+      if (timeSinceLastUpdate >= 1 || Math.abs(progressDelta) > 1) {
+        const elapsed = (now - startTimeRef.current) / 1000; // seconds
+        
+        if (progress.percentage > 1 && elapsed > 0) {
+          // Calculate average rate: total progress / elapsed time
+          const averageRate = progress.percentage / elapsed; // % per second
+          const remaining = (100 - progress.percentage) / averageRate; // seconds remaining
+          
+          if (remaining > 0 && remaining < 7200) { // Only show if less than 2 hours
+            const finishTime = new Date(now + remaining * 1000);
+            setEstimatedFinishTime(finishTime);
+          } else {
+            setEstimatedFinishTime(null);
+          }
+        }
+        
+        lastProgressRef.current = progress.percentage;
+        lastUpdateTimeRef.current = now;
+      }
+    } else if (!isExporting) {
+      // Reset when export stops
+      startTimeRef.current = null;
+      lastProgressRef.current = 0;
+      lastUpdateTimeRef.current = Date.now();
+      setEstimatedFinishTime(null);
+    }
+  }, [isExporting, progress]);
+
+  // Update estimated finish time display every second while exporting
+  useEffect(() => {
+    if (!isExporting || !estimatedFinishTime) return;
+    
+    const interval = setInterval(() => {
+      // Force re-render to update time remaining
+      setEstimatedFinishTime(prev => prev ? new Date(prev.getTime()) : null);
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [isExporting, estimatedFinishTime]);
+
+  // Play sound notification when export completes
+  useEffect(() => {
+    if (!isExporting && progress && progress.percentage >= 100 && !error && soundNotification) {
+      // Create a pleasant two-tone notification sound using Web Audio API
+      try {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        
+        // First tone (C5)
+        const osc1 = audioContext.createOscillator();
+        const gain1 = audioContext.createGain();
+        osc1.type = 'sine';
+        osc1.frequency.value = 523.25; // C5
+        gain1.gain.setValueAtTime(0, audioContext.currentTime);
+        gain1.gain.linearRampToValueAtTime(0.2, audioContext.currentTime + 0.05);
+        gain1.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+        
+        osc1.connect(gain1);
+        gain1.connect(audioContext.destination);
+        osc1.start(audioContext.currentTime);
+        osc1.stop(audioContext.currentTime + 0.2);
+        
+        // Second tone (E5) - starts slightly after first
+        const osc2 = audioContext.createOscillator();
+        const gain2 = audioContext.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.value = 659.25; // E5
+        gain2.gain.setValueAtTime(0, audioContext.currentTime + 0.1);
+        gain2.gain.linearRampToValueAtTime(0.2, audioContext.currentTime + 0.15);
+        gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.35);
+        
+        osc2.connect(gain2);
+        gain2.connect(audioContext.destination);
+        osc2.start(audioContext.currentTime + 0.1);
+        osc2.stop(audioContext.currentTime + 0.35);
+      } catch (err) {
+        console.warn('Could not play notification sound:', err);
+      }
+    }
+  }, [isExporting, progress, error, soundNotification]);
 
   useEffect(() => {
     if (!isExporting && progress && progress.percentage >= 100 && !error) {
@@ -34,6 +146,48 @@ export function ExportDialog({
       return () => clearTimeout(timer);
     }
   }, [isExporting, progress, error, onClose]);
+
+  // Format time remaining
+  const formatTimeRemaining = (): string => {
+    if (!estimatedFinishTime) return 'Calculating...';
+    
+    const now = Date.now();
+    const remaining = Math.max(0, estimatedFinishTime.getTime() - now);
+    const seconds = Math.floor(remaining / 1000);
+    
+    if (seconds < 60) {
+      return `${seconds}s`;
+    } else if (seconds < 3600) {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}m ${secs}s`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const mins = Math.floor((seconds % 3600) / 60);
+      return `${hours}h ${mins}m`;
+    }
+  };
+
+  // Format finish time
+  const formatFinishTime = (): string => {
+    if (!estimatedFinishTime) return '';
+    
+    const now = new Date();
+    const finish = estimatedFinishTime;
+    
+    // If same day, show time only
+    if (finish.toDateString() === now.toDateString()) {
+      return finish.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    
+    // Otherwise show date and time
+    return finish.toLocaleString([], { 
+      month: 'short', 
+      day: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
 
   if (!isOpen) return null;
 
@@ -130,6 +284,39 @@ export function ExportDialog({
                   Processing
                 </div>
               </div>
+            </div>
+
+            {/* Estimated Finish Time */}
+            {estimatedFinishTime && (
+              <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Estimated Finish</div>
+                <div className="text-slate-200 font-medium text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono">{formatFinishTime()}</span>
+                    <span className="text-slate-500">({formatTimeRemaining()} remaining)</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sound Notification Toggle */}
+            <div className="flex items-center justify-between bg-white/5 rounded-xl p-3 border border-white/5">
+              <div className="flex items-center gap-2">
+                {soundNotification ? (
+                  <Bell className="w-4 h-4 text-slate-400" />
+                ) : (
+                  <BellOff className="w-4 h-4 text-slate-500" />
+                )}
+                <div>
+                  <div className="text-xs font-medium text-slate-200">Sound Notification</div>
+                  <div className="text-[10px] text-slate-500">Play sound when export completes</div>
+                </div>
+              </div>
+              <Switch
+                checked={soundNotification}
+                onCheckedChange={setSoundNotification}
+                className="data-[state=checked]:bg-[#DA1F26]"
+              />
             </div>
 
             {onCancel && (

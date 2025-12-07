@@ -46,6 +46,7 @@ export class VideoExporter {
   private muxingPromises: Promise<void>[] = [];
   private chunkCount = 0;
   private hasAudio = false;
+  public hardwareAcceleration: boolean = false; // Track if using hardware acceleration
   private audioChunks: EncodedAudioChunk[] = [];
   private audioProcessingPromise: Promise<void> | null = null;
 
@@ -492,10 +493,12 @@ export class VideoExporter {
     if (hardwareSupport.supported) {
       // Use hardware encoding
       console.log('[VideoExporter] Using hardware acceleration');
+      this.hardwareAcceleration = true;
       this.encoder.configure(encoderConfig);
     } else {
       // Fall back to software encoding
       console.log('[VideoExporter] Hardware not supported, using software encoding');
+      this.hardwareAcceleration = false;
       encoderConfig.hardwareAcceleration = 'prefer-software';
       
       const softwareSupport = await VideoEncoder.isConfigSupported(encoderConfig);
