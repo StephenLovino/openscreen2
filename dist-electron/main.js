@@ -824,10 +824,73 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
       });
     });
   });
+  ipcMain.on("menu-open-project", async () => {
+    const mainWin = getMainWindow();
+    if (!mainWin || mainWin.isDestroyed()) {
+      return;
+    }
+    try {
+      const result = await dialog.showOpenDialog(mainWin, {
+        title: "Open Project",
+        filters: [
+          { name: "JSON Files", extensions: ["json"] },
+          { name: "All Files", extensions: ["*"] }
+        ],
+        properties: ["openFile"]
+      });
+      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return;
+      }
+      const projectPath = result.filePaths[0];
+      const projectDataStr = await fs.readFile(projectPath, "utf-8");
+      const projectData = JSON.parse(projectDataStr);
+      const missingFiles = [];
+      const fileUrlToPath = (fileUrl) => {
+        let filePath = fileUrl.replace(/^file:\/\/+/, "");
+        if (filePath.match(/^\/[a-zA-Z]:/)) {
+          filePath = filePath.substring(1);
+        }
+        if (process.platform === "win32") {
+          filePath = filePath.replace(/\//g, path.sep);
+        }
+        return filePath;
+      };
+      if (projectData.videoPath) {
+        const videoFilePath = fileUrlToPath(projectData.videoPath);
+        try {
+          await fs.access(videoFilePath);
+        } catch {
+          missingFiles.push("Main video");
+        }
+      }
+      if (projectData.cameraVideoPath) {
+        const cameraFilePath = fileUrlToPath(projectData.cameraVideoPath);
+        try {
+          await fs.access(cameraFilePath);
+        } catch {
+          missingFiles.push("Camera video");
+        }
+      }
+      mainWin.webContents.send("open-project-data", {
+        projectData,
+        missingFiles,
+        projectPath
+      });
+    } catch (error) {
+      console.error("Failed to open project:", error);
+      mainWin.webContents.send("open-project-error", {
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
   ipcMain.on("menu-save-project", async () => {
+    console.log("[IPC] menu-save-project received");
     const mainWin = getMainWindow();
     if (mainWin && !mainWin.isDestroyed()) {
+      console.log("[IPC] Sending save-project-request to renderer");
       mainWin.webContents.send("save-project-request");
+    } else {
+      console.warn("[IPC] Main window not available for save-project");
     }
   });
   ipcMain.on("menu-re-record", () => {
@@ -856,12 +919,29 @@ function registerIpcHandlers(createEditorWindow2, createSourceSelectorWindow2, g
     }
   });
   ipcMain.handle("save-project-data", async (_, projectData) => {
+    console.log("[IPC] save-project-data handler called");
     try {
-      const PROJECTS_DIR = path.join(app.getPath("userData"), "projects");
-      await fs.mkdir(PROJECTS_DIR, { recursive: true });
+      const mainWin = getMainWindow();
+      if (!mainWin || mainWin.isDestroyed()) {
+        return { success: false, error: "Main window not available" };
+      }
       const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
-      const projectFileName = `project-${timestamp}.json`;
-      const projectPath = path.join(PROJECTS_DIR, projectFileName);
+      const defaultFileName = `project-${timestamp}.json`;
+      const result = await dialog.showSaveDialog(mainWin, {
+        title: "Save Project",
+        defaultPath: defaultFileName,
+        filters: [
+          { name: "JSON Files", extensions: ["json"] },
+          { name: "All Files", extensions: ["*"] }
+        ],
+        properties: ["showOverwriteConfirmation"]
+      });
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: "Save cancelled" };
+      }
+      const projectPath = result.filePath;
+      const projectDir = path.dirname(projectPath);
+      await fs.mkdir(projectDir, { recursive: true });
       await fs.writeFile(projectPath, JSON.stringify(projectData, null, 2), "utf-8");
       return { success: true, path: projectPath };
     } catch (error) {
@@ -931,6 +1011,15 @@ function setEditorMenu() {
     {
       label: "File",
       submenu: [
+        {
+          label: "Open Project",
+          accelerator: "CmdOrCtrl+O",
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send("menu-open-project");
+            }
+          }
+        },
         {
           label: "Save Project",
           accelerator: "CmdOrCtrl+S",

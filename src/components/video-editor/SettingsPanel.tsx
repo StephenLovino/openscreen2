@@ -8,8 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import Colorful from '@uiw/react-color-colorful';
 import { hsvaToHex } from '@uiw/color-convert';
-import { Trash2, Download, Crop, X, Bug, Upload, Circle, Square, RectangleHorizontal } from "lucide-react";
-import { GiHearts } from "react-icons/gi";
+import { Trash2, Download, Crop, X, Upload, Circle, Square, RectangleHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import type { ZoomDepth, CropRegion } from "./types";
 import { CropControl } from "./CropControl";
@@ -649,26 +648,15 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
           <Download className="w-5 h-5" />
           <span>Export {exportFormat === 'gif' ? 'GIF' : 'Video'}</span>
         </Button>
-        <div className="flex gap-2 mt-4">
+        <div className="mt-4 text-center">
           <button
             type="button"
             onClick={() => {
-              apiBridge.openExternalUrl('https://github.com/siddharthvaddem/openscreen/issues/new');
+              apiBridge.openExternalUrl('https://www.stephenlovino.com/');
             }}
-            className="flex-1 flex items-center justify-center gap-2 text-xs py-2"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
-            <Bug className="w-3 h-3 text-[#DA1F26]" />
-            <span>Report a Bug</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              apiBridge.openExternalUrl('https://buymeacoffee.com/siddharthvaddem');
-            }}
-            className="flex-1 flex items-center justify-center gap-2 text-xs"
-          >
-            <GiHearts className="w-3 h-3 text-red-500" />
-            <span>Support my work</span>
+            Made with 💙 by Stephen Lovino
           </button>
         </div>
       </div>

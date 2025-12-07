@@ -222,6 +222,7 @@ export class GifExporter {
         }
         
         // Get ImageData from canvas for GIF
+        // Use willReadFrequently for better performance when reading multiple times
         const frame = ctx!.getImageData(0, 0, canvas.width, canvas.height);
         videoFrame.close();
         
@@ -245,9 +246,31 @@ export class GifExporter {
         return { success: false, error: 'Export cancelled' };
       }
 
+      // Update progress to indicate encoding is starting
+      if (this.config.onProgress) {
+        this.config.onProgress({
+          currentFrame: totalFrames,
+          totalFrames,
+          percentage: 95, // Set to 95% to indicate encoding phase
+          estimatedTimeRemaining: 0,
+        });
+      }
+
       // Convert frames to GIF using a library or canvas-based approach
       // For now, we'll use a simple approach with canvas and a GIF encoder
+      console.log('[GifExporter] Starting GIF encoding with', frames.length, 'frames');
       const gifBlob = await this.encodeGif(frames, frameInterval * 1000);
+      console.log('[GifExporter] GIF encoding complete, blob size:', gifBlob.size);
+
+      // Update progress to 100%
+      if (this.config.onProgress) {
+        this.config.onProgress({
+          currentFrame: totalFrames,
+          totalFrames,
+          percentage: 100,
+          estimatedTimeRemaining: 0,
+        });
+      }
 
       return {
         success: true,
@@ -277,6 +300,9 @@ export class GifExporter {
       workerScript = 'https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js';
     }
     
+    const onProgress = this.config.onProgress;
+    const totalFrames = frames.length;
+    
     const gif = new GIF({
       workers: 2,
       quality: 10,
@@ -286,28 +312,61 @@ export class GifExporter {
     });
 
     // Add frames to GIF
-    for (const frame of frames) {
+    console.log('[GifExporter] Adding', frames.length, 'frames to GIF encoder');
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i];
       const canvas = document.createElement('canvas');
       canvas.width = this.config.width;
       canvas.height = this.config.height;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) {
         throw new Error('Failed to get canvas context');
       }
       
       ctx.putImageData(frame, 0, 0);
       gif.addFrame(canvas, { delay });
+      
+      if ((i + 1) % 50 === 0) {
+        console.log('[GifExporter] Added', i + 1, 'frames to GIF encoder');
+      }
     }
+    console.log('[GifExporter] All frames added, starting render...');
 
     return new Promise((resolve, reject) => {
+      console.log('[GifExporter] Starting GIF encoding with', frames.length, 'frames');
+      
+      // Set a timeout to prevent hanging (5 minutes should be enough for most GIFs)
+      const timeout = setTimeout(() => {
+        console.error('[GifExporter] GIF encoding timeout after 5 minutes');
+        reject(new Error('GIF encoding timed out'));
+      }, 5 * 60 * 1000);
+      
       gif.on('finished', (blob: Blob) => {
+        clearTimeout(timeout);
+        console.log('[GifExporter] GIF encoding finished, blob size:', blob.size, 'bytes');
         resolve(blob);
       });
       
+      gif.on('progress', (p: number) => {
+        console.log('[GifExporter] GIF encoding progress:', (p * 100).toFixed(1) + '%');
+        // Update progress during encoding
+        if (onProgress) {
+          onProgress({
+            currentFrame: Math.floor(totalFrames * p),
+            totalFrames,
+            percentage: 95 + (p * 5), // 95-100% during encoding
+            estimatedTimeRemaining: 0,
+          });
+        }
+      });
+      
       gif.on('error', (error: Error) => {
+        clearTimeout(timeout);
+        console.error('[GifExporter] GIF encoding error:', error);
         reject(error);
       });
       
+      console.log('[GifExporter] Starting GIF render...');
       gif.render();
     });
   }
@@ -318,15 +377,15 @@ export class GifExporter {
 
   private cleanup(): void {
     if (this.decoder) {
-      this.decoder.cleanup();
+      this.decoder.destroy();
       this.decoder = null;
     }
     if (this.cameraDecoder) {
-      this.cameraDecoder.cleanup();
+      this.cameraDecoder.destroy();
       this.cameraDecoder = null;
     }
     if (this.renderer) {
-      this.renderer.cleanup();
+      this.renderer.destroy();
       this.renderer = null;
     }
   }

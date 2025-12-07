@@ -1,0 +1,39 @@
+{
+  "videoPath": "file:///home/stephen/.config/openscreen/recordings/recording-1765101780154.webm",
+  "cameraVideoPath": "file:///home/stephen/.config/openscreen/recordings/recording-1765101780154-camera.webm",
+  "wallpaper": "/wallpapers/wallpaper1.jpg",
+  "shadowIntensity": 0,
+  "showBlur": false,
+  "motionBlurEnabled": true,
+  "borderRadius": 0,
+  "padding": 50,
+  "cropRegion": {
+    "x": 0,
+    "y": 0,
+    "width": 1,
+    "height": 1
+  },
+  "hideCamera": false,
+  "cameraShape": "squircle",
+  "cameraSize": 150,
+  "cameraPosition": {
+    "x": 87.62331950078487,
+    "y": 65.8277472299743
+  },
+  "zoomRegions": [
+    {
+      "id": "zoom-auto-1",
+      "startMs": 6291,
+      "endMs": 8291,
+      "depth": 3,
+      "focus": {
+        "cx": 0.5729166666666666,
+        "cy": 0.5692307692307692
+      }
+    }
+  ],
+  "trimRegions": [],
+  "exportResolution": "1080p",
+  "exportFormat": "mp4",
+  "timestamp": "2025-12-07T10:03:13.266Z"
+}

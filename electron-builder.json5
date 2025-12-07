@@ -32,21 +32,57 @@
       {
         "target": "dmg",
         "arch": ["x64", "arm64"]
+      },
+      {
+        "target": "zip",
+        "arch": ["x64", "arm64"]
       }
     ],
     "icon": "icons/icons/mac/icon.icns",
-    "artifactName": "${productName}-Mac-${arch}-${version}-Installer.${ext}"
+    "artifactName": "${productName}-Mac-${arch}-${version}.${ext}",
+    "category": "public.app-category.utilities"
   },
   "linux": {
     "target": [
-      "AppImage"
+      {
+        "target": "deb",
+        "arch": ["x64", "arm64"]
+      },
+      {
+        "target": "AppImage",
+        "arch": ["x64", "arm64"]
+      }
     ],
-    "artifactName": "${productName}-Linux-${version}.${ext}"
+    "icon": "icons/icons/png/512x512.png",
+    "artifactName": "${productName}-Linux-${arch}-${version}.${ext}",
+    "category": "Utility",
+    "maintainer": "AHA Clips <support@ahaclips.com>",
+    "desktop": {
+      "Name": "AHA Clips",
+      "Comment": "Screen and camera recording application",
+      "Categories": "Utility;AudioVideo;"
+    }
   },
   "win": {
     "target": [
-      "nsis"
+      {
+        "target": "nsis",
+        "arch": ["x64", "ia32"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64", "ia32"]
+      }
     ],
-    "icon": "icons/icons/win/icon.ico"
+    "icon": "icons/icons/win/icon.ico",
+    "artifactName": "${productName}-Windows-${arch}-${version}.${ext}",
+    "publisherName": "AHA Clips"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "AHA Clips"
   }
 }

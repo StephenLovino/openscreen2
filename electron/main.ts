@@ -92,6 +92,15 @@ function setEditorMenu() {
       label: 'File',
       submenu: [
         {
+          label: 'Open Project',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('menu-open-project')
+            }
+          }
+        },
+        {
           label: 'Save Project',
           accelerator: 'CmdOrCtrl+S',
           click: () => {

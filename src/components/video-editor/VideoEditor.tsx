@@ -235,43 +235,116 @@ export default function VideoEditor() {
     loadVideo();
   }, []);
 
-  // Handle menu actions
+  // Use refs to store current state values so handlers don't need to be recreated
+  const stateRef = useRef({
+    videoPath,
+    cameraVideoPath,
+    wallpaper,
+    shadowIntensity,
+    showBlur,
+    motionBlurEnabled,
+    borderRadius,
+    padding,
+    cropRegion,
+    hideCamera,
+    cameraShape,
+    cameraSize,
+    cameraPosition,
+    zoomRegions,
+    trimRegions,
+    exportResolution,
+    exportFormat,
+  });
+
+  // Update refs when state changes
   useEffect(() => {
-    if (!window.electronAPI?.on) return;
+    stateRef.current = {
+      videoPath,
+      cameraVideoPath,
+      wallpaper,
+      shadowIntensity,
+      showBlur,
+      motionBlurEnabled,
+      borderRadius,
+      padding,
+      cropRegion,
+      hideCamera,
+      cameraShape,
+      cameraSize,
+      cameraPosition,
+      zoomRegions,
+      trimRegions,
+      exportResolution,
+      exportFormat,
+    };
+  }, [
+    videoPath,
+    cameraVideoPath,
+    wallpaper,
+    shadowIntensity,
+    showBlur,
+    motionBlurEnabled,
+    borderRadius,
+    padding,
+    cropRegion,
+    hideCamera,
+    cameraShape,
+    cameraSize,
+    cameraPosition,
+    zoomRegions,
+    trimRegions,
+    exportResolution,
+    exportFormat,
+  ]);
+
+  // Handle menu actions - only set up once, handlers read from refs
+  useEffect(() => {
+    console.log('[VideoEditor] Setting up menu action listeners, electronAPI available:', !!window.electronAPI?.on);
+    if (!window.electronAPI?.on) {
+      console.warn('[VideoEditor] electronAPI.on not available, menu actions will not work');
+      return;
+    }
 
     // Listen for save project request from menu
     const handleSaveProject = async () => {
+      console.log('[VideoEditor] Save project requested');
       try {
+        const state = stateRef.current;
         const projectData = {
-          videoPath,
-          cameraVideoPath,
-          wallpaper,
-          shadowIntensity,
-          showBlur,
-          motionBlurEnabled,
-          borderRadius,
-          padding,
-          cropRegion,
-          hideCamera,
-          cameraShape,
-          cameraSize,
-          cameraPosition,
-          zoomRegions,
-          trimRegions,
-          exportResolution,
-          exportFormat,
+          videoPath: state.videoPath,
+          cameraVideoPath: state.cameraVideoPath,
+          wallpaper: state.wallpaper,
+          shadowIntensity: state.shadowIntensity,
+          showBlur: state.showBlur,
+          motionBlurEnabled: state.motionBlurEnabled,
+          borderRadius: state.borderRadius,
+          padding: state.padding,
+          cropRegion: state.cropRegion,
+          hideCamera: state.hideCamera,
+          cameraShape: state.cameraShape,
+          cameraSize: state.cameraSize,
+          cameraPosition: state.cameraPosition,
+          zoomRegions: state.zoomRegions,
+          trimRegions: state.trimRegions,
+          exportResolution: state.exportResolution,
+          exportFormat: state.exportFormat,
           timestamp: new Date().toISOString(),
         };
 
+        console.log('[VideoEditor] Calling saveProjectData with project data:', projectData);
         const result = await apiBridge.saveProjectData(projectData);
+        console.log('[VideoEditor] Save result:', result);
         if (result.success) {
           toast.success('Project saved successfully', {
             description: result.path ? `Saved to: ${result.path}` : 'Project saved',
           });
         } else {
-          toast.error('Failed to save project', {
-            description: result.error || 'Unknown error',
-          });
+          // Don't show error if user cancelled the save dialog
+          if (result.error !== 'Save cancelled') {
+            toast.error('Failed to save project', {
+              description: result.error || 'Unknown error',
+            });
+          }
         }
       } catch (error) {
         console.error('Error saving project:', error);
@@ -298,36 +371,129 @@ export default function VideoEditor() {
       }
     };
 
-    window.electronAPI.on('save-project-request', handleSaveProject);
-    window.electronAPI.on('menu-re-record', handleReRecord);
-    window.electronAPI.on('menu-discard-exit', handleDiscardExit);
+    // Listen for open project request from menu
+    const handleOpenProject = async (_event: any, data: { projectData: any; missingFiles: string[]; projectPath: string }) => {
+      try {
+        const { projectData, missingFiles, projectPath } = data;
 
-    return () => {
-      if (window.electronAPI?.off) {
-        window.electronAPI.off('save-project-request', handleSaveProject);
-        window.electronAPI.off('menu-re-record', handleReRecord);
-        window.electronAPI.off('menu-discard-exit', handleDiscardExit);
+        // Show warning if files are missing
+        if (missingFiles.length > 0) {
+          const missingList = missingFiles.join(', ');
+          toast.warning('Some video files are missing', {
+            description: `The following files could not be found: ${missingList}. The project will load but videos may not play.`,
+            duration: 5000,
+          });
+        }
+
+        // Restore project state
+        if (projectData.videoPath) {
+          setVideoPath(projectData.videoPath);
+        }
+        if (projectData.cameraVideoPath) {
+          setCameraVideoPath(projectData.cameraVideoPath);
+        }
+        if (projectData.wallpaper !== undefined) {
+          setWallpaper(projectData.wallpaper);
+        }
+        if (projectData.shadowIntensity !== undefined) {
+          setShadowIntensity(projectData.shadowIntensity);
+        }
+        if (projectData.showBlur !== undefined) {
+          setShowBlur(projectData.showBlur);
+        }
+        if (projectData.motionBlurEnabled !== undefined) {
+          setMotionBlurEnabled(projectData.motionBlurEnabled);
+        }
+        if (projectData.borderRadius !== undefined) {
+          setBorderRadius(projectData.borderRadius);
+        }
+        if (projectData.padding !== undefined) {
+          setPadding(projectData.padding);
+        }
+        if (projectData.cropRegion) {
+          setCropRegion(projectData.cropRegion);
+        }
+        if (projectData.hideCamera !== undefined) {
+          setHideCamera(projectData.hideCamera);
+        }
+        if (projectData.cameraShape) {
+          setCameraShape(projectData.cameraShape);
+        }
+        if (projectData.cameraSize !== undefined) {
+          setCameraSize(projectData.cameraSize);
+        }
+        if (projectData.cameraPosition) {
+          setCameraPosition(projectData.cameraPosition);
+        }
+        if (projectData.zoomRegions) {
+          setZoomRegions(projectData.zoomRegions);
+          // Update nextZoomIdRef to avoid ID conflicts
+          if (projectData.zoomRegions.length > 0) {
+            const maxId = Math.max(...projectData.zoomRegions.map((z: ZoomRegion) => {
+              const match = z.id.match(/zoom-(\d+)/);
+              return match ? parseInt(match[1], 10) : 0;
+            }));
+            nextZoomIdRef.current = maxId + 1;
+          }
+        }
+        if (projectData.trimRegions) {
+          setTrimRegions(projectData.trimRegions);
+          // Update nextTrimIdRef to avoid ID conflicts
+          if (projectData.trimRegions.length > 0) {
+            const maxId = Math.max(...projectData.trimRegions.map((t: TrimRegion) => {
+              const match = t.id.match(/trim-(\d+)/);
+              return match ? parseInt(match[1], 10) : 0;
+            }));
+            nextTrimIdRef.current = maxId + 1;
+          }
+        }
+        if (projectData.exportResolution) {
+          setExportResolution(projectData.exportResolution);
+        }
+        if (projectData.exportFormat) {
+          setExportFormat(projectData.exportFormat);
+        }
+
+        toast.success('Project loaded successfully', {
+          description: `Loaded from: ${projectPath}`,
+        });
+      } catch (error) {
+        console.error('Error loading project:', error);
+        toast.error('Failed to load project', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        });
       }
     };
-  }, [
-    videoPath,
-    cameraVideoPath,
-    wallpaper,
-    shadowIntensity,
-    showBlur,
-    motionBlurEnabled,
-    borderRadius,
-    padding,
-    cropRegion,
-    hideCamera,
-    cameraShape,
-    cameraSize,
-    cameraPosition,
-    zoomRegions,
-    trimRegions,
-    exportResolution,
-    exportFormat,
-  ]);
+
+    // Listen for open project error
+    const handleOpenProjectError = (_event: any, data: { error: string }) => {
+      toast.error('Failed to open project', {
+        description: data.error || 'Unknown error',
+      });
+    };
+
+    console.log('[VideoEditor] Registering event listeners');
+    // Listen for both 'save-project-request' (from IPC handler) and 'menu-save-project' (direct from menu)
+    window.electronAPI.on('save-project-request', handleSaveProject);
+    window.electronAPI.on('menu-save-project', handleSaveProject);
+    window.electronAPI.on('menu-re-record', handleReRecord);
+    window.electronAPI.on('menu-discard-exit', handleDiscardExit);
+    window.electronAPI.on('open-project-data', handleOpenProject);
+    window.electronAPI.on('open-project-error', handleOpenProjectError);
+    console.log('[VideoEditor] Event listeners registered');
+
+    return () => {
+      console.log('[VideoEditor] Cleaning up event listeners');
+      if (window.electronAPI?.off) {
+        window.electronAPI.off('save-project-request', handleSaveProject);
+        window.electronAPI.off('menu-save-project', handleSaveProject);
+        window.electronAPI.off('menu-re-record', handleReRecord);
+        window.electronAPI.off('menu-discard-exit', handleDiscardExit);
+        window.electronAPI.off('open-project-data', handleOpenProject);
+        window.electronAPI.off('open-project-error', handleOpenProjectError);
+      }
+    };
+  }, []); // Empty deps - handlers read from refs, so they don't need to be recreated
 
   function togglePlayPause() {
     const playback = videoPlaybackRef.current;
@@ -584,7 +750,9 @@ export default function VideoEditor() {
         });
 
         exporterRef.current = gifExporter as any;
+        console.log('[VideoEditor] Starting GIF export...');
         result = await gifExporter.export();
+        console.log('[VideoEditor] GIF export completed, result:', result);
         fileName = `export-${timestamp}.gif`;
       } else {
         // Use video exporter
@@ -620,10 +788,15 @@ export default function VideoEditor() {
         fileName = `export-${timestamp}.mp4`;
       }
 
+      console.log('[VideoEditor] Export result:', result);
       if (result.success && result.blob) {
+        console.log('[VideoEditor] Export successful, blob size:', result.blob.size, 'type:', result.blob.type);
         const arrayBuffer = await result.blob.arrayBuffer();
+        console.log('[VideoEditor] ArrayBuffer created, size:', arrayBuffer.byteLength);
+        console.log('[VideoEditor] Calling saveExportedVideo with fileName:', fileName);
         
         const saveResult = await apiBridge.saveExportedVideo(arrayBuffer, fileName);
+        console.log('[VideoEditor] Save result:', saveResult);
         
         if (saveResult.cancelled) {
           toast.info('Export cancelled');
@@ -634,6 +807,7 @@ export default function VideoEditor() {
           toast.error(`Failed to save ${exportFormat === 'gif' ? 'GIF' : 'video'}`);
         }
       } else {
+        console.error('[VideoEditor] Export failed:', result.error);
         setExportError(result.error || 'Export failed');
         toast.error(result.error || 'Export failed');
       }
@@ -826,6 +1000,7 @@ export default function VideoEditor() {
         progress={exportProgress}
         isExporting={isExporting}
         error={exportError}
+        exportFormat={exportFormat}
         onCancel={handleCancelExport}
       />
     </div>

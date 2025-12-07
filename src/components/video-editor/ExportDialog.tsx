@@ -9,6 +9,7 @@ interface ExportDialogProps {
   progress: ExportProgress | null;
   isExporting: boolean;
   error: string | null;
+  exportFormat?: 'mp4' | 'gif';
   onCancel?: () => void;
 }
 
@@ -18,6 +19,7 @@ export function ExportDialog({
   progress,
   isExporting,
   error,
+  exportFormat = 'mp4',
   onCancel,
 }: ExportDialogProps) {
   const [showSuccess, setShowSuccess] = useState(false);
@@ -51,7 +53,7 @@ export function ExportDialog({
                 </div>
                 <div>
                   <span className="text-xl font-bold text-slate-200 block">Export Complete</span>
-                  <span className="text-sm text-slate-400">Your video is ready</span>
+                  <span className="text-sm text-slate-400">Your {exportFormat === 'gif' ? 'GIF' : 'video'} is ready</span>
                 </div>
               </>
             ) : (
@@ -67,7 +69,7 @@ export function ExportDialog({
                 )}
                 <div>
                   <span className="text-xl font-bold text-slate-200 block">
-                    {error ? 'Export Failed' : isExporting ? 'Exporting Video' : 'Export Video'}
+                    {error ? 'Export Failed' : isExporting ? (exportFormat === 'gif' ? 'Exporting GIF' : 'Exporting Video') : (exportFormat === 'gif' ? 'Export GIF' : 'Export Video')}
                   </span>
                   <span className="text-sm text-slate-400">
                     {error ? 'Please try again' : isExporting ? 'This may take a moment...' : 'Ready to start'}
@@ -146,7 +148,7 @@ export function ExportDialog({
 
         {showSuccess && (
           <div className="text-center py-4 animate-in zoom-in-95">
-            <p className="text-lg text-slate-200 font-medium">Video saved successfully!</p>
+            <p className="text-lg text-slate-200 font-medium">{exportFormat === 'gif' ? 'GIF' : 'Video'} saved successfully!</p>
           </div>
         )}
       </div>
