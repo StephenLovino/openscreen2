@@ -9,7 +9,7 @@ import { MdVideocam } from "react-icons/md";
 import { RxDragHandleDots2 } from "react-icons/rx";
 import { FaFolderMinus } from "react-icons/fa6";
 import { FiMinus, FiX } from "react-icons/fi";
-import { VideoOff, MicOff } from "lucide-react";
+import { VideoOff, MicOff, Settings } from "lucide-react";
 import { apiBridge } from "../../lib/apiBridge";
 
 export function LaunchWindow() {
@@ -217,7 +217,7 @@ export function LaunchWindow() {
   return (
     <div className="w-full h-full flex items-stretch bg-transparent">
       <div
-        className={`w-full max-w-[500px] mx-auto flex items-center justify-between px-4 py-0 ${styles.electronDrag}`}
+        className={`w-full max-w-[500px] mx-auto flex items-center justify-between px-4 py-0 ${styles.electronDrag} ${styles.hudWidget}`}
         style={{
           borderRadius: 16,
           background: 'linear-gradient(135deg, rgba(30,30,40,0.92) 0%, rgba(20,20,30,0.85) 100%)',
@@ -342,6 +342,19 @@ export function LaunchWindow() {
         >
           <FaFolderMinus size={14} className="text-white" />
           <span className={styles.folderText}>Open</span>
+        </Button>
+
+        <div className="w-px h-6 bg-white/30" />
+
+        <Button
+          variant="link"
+          size="sm"
+          onClick={() => apiBridge.openSettings()}
+          className={`gap-1 text-white bg-transparent hover:bg-transparent px-0 flex-1 text-right text-xs ${styles.electronNoDrag}`}
+          title="Settings"
+        >
+          <Settings size={14} className="text-white" />
+          <span>Settings</span>
         </Button>
 
          {/* Separator before hide/close buttons */}

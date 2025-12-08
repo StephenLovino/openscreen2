@@ -2,11 +2,51 @@ import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
-import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, createCameraPreviewWindow, createCameraWarningDialogWindow } from './windows'
+import { createHudOverlayWindow, createEditorWindow, createSourceSelectorWindow, createCameraPreviewWindow, createCameraWarningDialogWindow, createSettingsWindow } from './windows'
 import { registerIpcHandlers } from './ipc/handlers'
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// Enable GPU acceleration and hardware video encoding
+// These flags must be set BEFORE app.whenReady()
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('enable-hardware-accelerated-video-decode')
+app.commandLine.appendSwitch('enable-hardware-accelerated-video-encode')
+app.commandLine.appendSwitch('enable-accelerated-video-decode')
+app.commandLine.appendSwitch('enable-accelerated-video-encode')
+// Force GPU compositing
+app.commandLine.appendSwitch('enable-gpu-compositing')
+// Disable software rendering fallback to force GPU usage
+app.disableHardwareAcceleration = false
+
+// Linux-specific GPU acceleration flags
+if (process.platform === 'linux') {
+  // Use desktop OpenGL (important for NVIDIA on Linux)
+  app.commandLine.appendSwitch('use-gl', 'desktop')
+  
+  // Force GPU usage (ignore blacklist)
+  app.commandLine.appendSwitch('ignore-gpu-blacklist')
+  app.commandLine.appendSwitch('ignore-gpu-blocklist')
+  
+  // Enable experimental WebGPU (needed for some GPU detection)
+  app.commandLine.appendSwitch('enable-unsafe-webgpu')
+  
+  // Enable VAAPI for Intel/AMD GPUs, ChromeOS video decoder, and HEVC support
+  // Combine all features in a single flag
+  app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,VaapiVideoEncoder,UseChromeOSDirectVideoDecoder,PlatformHEVCDecoderSupport')
+  
+  // NVIDIA-specific: Force discrete GPU usage
+  // This helps ensure NVIDIA GPUs are used instead of integrated graphics
+  app.commandLine.appendSwitch('use-angle', 'gl')
+  
+  // Additional flags for better GPU detection and video encoding
+  app.commandLine.appendSwitch('enable-gpu-memory-buffer-video-frames')
+  app.commandLine.appendSwitch('enable-native-gpu-memory-buffers')
+  
+  console.log('[Electron] Linux GPU acceleration flags enabled')
+}
 
 export const RECORDINGS_DIR = path.join(app.getPath('userData'), 'recordings')
 
@@ -44,6 +84,7 @@ let mainWindow: BrowserWindow | null = null
 let sourceSelectorWindow: BrowserWindow | null = null
 let cameraPreviewWindow: BrowserWindow | null = null
 let cameraWarningDialogWindow: BrowserWindow | null = null
+let settingsWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let selectedSourceName = ''
 
@@ -207,6 +248,18 @@ function createSourceSelectorWindowWrapper(mode?: 'screen' | 'camera') {
   return sourceSelectorWindow
 }
 
+function createSettingsWindowWrapper() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus()
+    return settingsWindow
+  }
+  settingsWindow = createSettingsWindow()
+  settingsWindow.on('closed', () => {
+    settingsWindow = null
+  })
+  return settingsWindow
+}
+
 function createCameraPreviewWindowWrapper() {
   console.log('🔵 main.ts: createCameraPreviewWindowWrapper called');
   if (cameraPreviewWindow && !cameraPreviewWindow.isDestroyed()) {
@@ -326,7 +379,8 @@ app.whenReady().then(async () => {
     closeCameraPreviewWindowWrapper,
     createCameraWarningDialogWindowWrapper,
     closeCameraWarningDialogWindowWrapper,
-    () => cameraWarningDialogWindow
+    () => cameraWarningDialogWindow,
+    createSettingsWindowWrapper
   )
   createWindow()
 })

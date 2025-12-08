@@ -3,6 +3,7 @@ import { VideoFileDecoder } from './videoDecoder';
 import { FrameRenderer } from './frameRenderer';
 import { VideoMuxer } from './muxer';
 import { AudioExtractor } from './audioExtractor';
+import { FFmpegVideoExporter } from './ffmpegVideoExporter';
 import type { ZoomRegion, CropRegion, TrimRegion } from '@/components/video-editor/types';
 
 interface VideoExporterConfig extends ExportConfig {
@@ -23,6 +24,7 @@ interface VideoExporterConfig extends ExportConfig {
   videoPadding?: number;
   cropRegion: CropRegion;
   hideCamera?: boolean;
+  preferGpuAcceleration?: boolean; // User preference: true = prefer GPU, false = prefer CPU
   onProgress?: (progress: ExportProgress) => void;
 }
 
@@ -89,9 +91,66 @@ export class VideoExporter {
       this.cleanup();
       this.cancelled = false;
 
-      // Initialize decoder and load main video
-      this.decoder = new VideoFileDecoder();
-      const videoInfo = await this.decoder.loadVideo(this.config.videoUrl);
+      // Check user preference for GPU acceleration
+      const preferGpu = this.config.preferGpuAcceleration !== false; // Default to true if not specified
+      
+      // Check if hardware acceleration is available (only if user prefers GPU)
+      let hardwareConfig: VideoEncoderConfig | null = null;
+      if (preferGpu) {
+        hardwareConfig = await this.checkHardwareAcceleration();
+      } else {
+        console.log('[VideoExporter] 💡 User preference: CPU encoding (GPU disabled)');
+      }
+      
+      let encoderInitialized = false;
+      
+      if (!hardwareConfig) {
+        // Try WebCodecs software encoding first (more memory efficient than FFmpeg.wasm)
+        console.log('[VideoExporter] ⚠️ GPU not available, trying WebCodecs software encoding...');
+        try {
+          // Initialize decoder first (needed for encoder initialization)
+          this.decoder = new VideoFileDecoder();
+          const videoInfo = await this.decoder.loadVideo(this.config.videoUrl);
+          
+          // Initialize encoder with software encoding
+          await this.initializeEncoder();
+          encoderInitialized = true;
+          // If we get here, software encoding works - continue with WebCodecs path
+          console.log('[VideoExporter] ✅ WebCodecs software encoding available, using it');
+          this.hardwareAcceleration = false;
+          // Continue with normal export flow below (skip decoder/encoder initialization)
+        } catch (error) {
+          // WebCodecs software encoding failed, fall back to FFmpeg.wasm
+          console.log('[VideoExporter] 🔄 WebCodecs software encoding failed, falling back to FFmpeg.wasm');
+          console.warn('[VideoExporter] ⚠️ FFmpeg.wasm is memory-intensive and may cause crashes on large videos');
+          // Clean up any partial initialization
+          if (this.decoder) {
+            this.decoder.cleanup();
+            this.decoder = null;
+          }
+          const ffmpegExporter = new FFmpegVideoExporter(this.config);
+          const result = await ffmpegExporter.export();
+          this.hardwareAcceleration = false;
+          return result;
+        }
+      } else {
+        // Hardware acceleration available - use it
+        console.log('[VideoExporter] ✅ Using WebCodecs with GPU acceleration');
+      }
+
+      // Initialize decoder and load main video (skip if already initialized for software encoding)
+      let videoInfo;
+      if (!encoderInitialized) {
+        this.decoder = new VideoFileDecoder();
+        videoInfo = await this.decoder.loadVideo(this.config.videoUrl);
+      } else {
+        // Decoder already initialized, get video info
+        videoInfo = {
+          width: this.decoder!.getVideoElement().videoWidth,
+          height: this.decoder!.getVideoElement().videoHeight,
+          duration: this.decoder!.getVideoElement().duration,
+        };
+      }
       
       // Check if video has audio - we'll extract it using FFmpeg
       // Assume audio exists if it's a webm/mp4 file (MediaRecorder typically includes audio)
@@ -146,8 +205,10 @@ export class VideoExporter {
       });
       await this.renderer.initialize();
 
-      // Initialize video encoder
-      await this.initializeEncoder();
+      // Initialize video encoder (skip if already initialized for software encoding)
+      if (!encoderInitialized) {
+        await this.initializeEncoder();
+      }
 
       // Initialize muxer first (needed for audio encoder)
       console.log('[VideoExporter] Initializing muxer with hasAudio:', this.hasAudio);
@@ -240,7 +301,12 @@ export class VideoExporter {
 
         // Draw camera overlay as a separate layer if enabled
         if (this.config.cameraVideoUrl && !this.config.hideCamera && cameraVideoElement) {
-          const ctx = canvas.getContext('2d');
+          // Use GPU-optimized context - willReadFrequently: false enables GPU acceleration
+          // Do NOT use desynchronized: true as it causes frames to be read before fully rendered
+          const ctx = canvas.getContext('2d', { 
+            willReadFrequently: false,
+            alpha: true,
+          });
           if (ctx && cameraVideoElement.videoWidth && cameraVideoElement.videoHeight) {
             const cw = canvas.width;
             const ch = canvas.height;
@@ -331,6 +397,10 @@ export class VideoExporter {
           }
         }
 
+        // Ensure canvas is fully rendered before encoding (prevents GPU stalls and artifacts)
+        // Use a microtask to let the browser complete the canvas rendering
+        await new Promise(resolve => setTimeout(resolve, 0));
+
         // Create VideoFrame from canvas on GPU without reading pixels
         // @ts-ignore - colorSpace not in TypeScript definitions but works at runtime
         const exportFrame = new VideoFrame(canvas, {
@@ -411,11 +481,97 @@ export class VideoExporter {
     }
   }
 
+  /**
+   * Checks if hardware-accelerated video encoding is available
+   * Returns the codec config if GPU encoding is supported, null otherwise
+   * On Linux, this can be unreliable, so we also try to actually create an encoder
+   */
+  private async checkHardwareAcceleration(): Promise<VideoEncoderConfig | null> {
+    const codec = this.config.codec || 'avc1.640033';
+    
+    // Log system info for debugging
+    console.log('[VideoExporter] 🔍 Checking for hardware acceleration...');
+    console.log('[VideoExporter] Platform:', navigator.platform, 'User Agent:', navigator.userAgent);
+    
+    // Try to find a codec profile that supports hardware acceleration
+    const codecProfiles = [
+      'avc1.640033', // H.264 High Profile Level 3.3 (most common)
+      'avc1.640028', // H.264 High Profile Level 2.8 (better compatibility)
+      'avc1.64001f', // H.264 High Profile Level 1.3 (older GPUs)
+      'avc1.64001e', // H.264 Baseline Profile Level 3.0 (maximum compatibility)
+      'avc1.42e01e', // H.264 Baseline Profile Level 1.3 (fallback)
+      'avc1.4d001f', // H.264 Main Profile Level 3.1
+      'avc1.4d0020', // H.264 Main Profile Level 4.0
+    ];
+    
+    // First, check if any codec is supported with hardware preference
+    for (const testCodec of codecProfiles) {
+      const encoderConfig: VideoEncoderConfig = {
+        codec: testCodec,
+        width: this.config.width,
+        height: this.config.height,
+        bitrate: this.config.bitrate,
+        framerate: this.config.frameRate,
+        latencyMode: 'realtime',
+        bitrateMode: 'variable',
+        hardwareAcceleration: 'prefer-hardware',
+      };
+      
+      const support = await VideoEncoder.isConfigSupported(encoderConfig);
+      if (support.supported) {
+        // On Linux, isConfigSupported can return true even without hardware acceleration
+        // So we try to actually create and configure an encoder to verify
+        try {
+          const testEncoder = new VideoEncoder({
+            output: () => {},
+            error: () => {},
+          });
+          
+          testEncoder.configure(encoderConfig);
+          
+          // Check encoder state - if it's configured, hardware acceleration might be working
+          if (testEncoder.state === 'configured') {
+            console.log(`[VideoExporter] ✅ Hardware acceleration available with codec: ${testCodec}`);
+            testEncoder.close();
+            return encoderConfig;
+          }
+          
+          testEncoder.close();
+        } catch (error) {
+          console.warn(`[VideoExporter] Codec ${testCodec} reported as supported but failed to configure:`, error);
+        }
+      }
+    }
+    
+    // If prefer-hardware didn't work, hardware acceleration is not available
+    // Note: There's no 'require-hardware' value - valid values are:
+    // 'prefer-hardware', 'prefer-software', 'no-preference'
+    console.log('[VideoExporter] ⚠️ Hardware acceleration not available');
+    console.log('[VideoExporter] 💡 This might be a detection issue on Linux. Will try software encoding.');
+    return null;
+  }
+
   private async initializeEncoder(): Promise<void> {
     this.encodeQueue = 0;
     this.muxingPromises = [];
     this.chunkCount = 0;
     let videoDescription: Uint8Array | undefined;
+    
+    // Log GPU information for debugging
+    try {
+      const adapter = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
+      if (adapter) {
+        const info = await adapter.requestAdapterInfo?.();
+        console.log('[VideoExporter] 🎮 GPU Info:', {
+          vendor: info?.vendor || 'unknown',
+          architecture: info?.architecture || 'unknown',
+          device: info?.device || 'unknown',
+          description: info?.description || 'unknown',
+        });
+      }
+    } catch (e) {
+      console.warn('[VideoExporter] Could not detect GPU info:', e);
+    }
 
     this.encoder = new VideoEncoder({
       output: (chunk, meta) => {
@@ -474,39 +630,81 @@ export class VideoExporter {
       },
     });
 
+    // Try hardware acceleration first, then fall back to software
     const codec = this.config.codec || 'avc1.640033';
+    const codecProfiles = [
+      'avc1.640033', // H.264 High Profile Level 3.3 (most common)
+      'avc1.640028', // H.264 High Profile Level 2.8 (better compatibility)
+      'avc1.64001f', // H.264 High Profile Level 1.3 (older GPUs)
+      'avc1.64001e', // H.264 Baseline Profile Level 3.0 (maximum compatibility)
+      'avc1.42e01e', // H.264 Baseline Profile Level 1.3 (fallback)
+      'avc1.4d001f', // H.264 Main Profile Level 3.1
+      'avc1.4d0020', // H.264 Main Profile Level 4.0
+    ];
     
-    const encoderConfig: VideoEncoderConfig = {
-      codec,
-      width: this.config.width,
-      height: this.config.height,
-      bitrate: this.config.bitrate,
-      framerate: this.config.frameRate,
-      latencyMode: 'realtime',
-      bitrateMode: 'variable',
-      hardwareAcceleration: 'prefer-hardware',
-    };
-
-    // Check hardware support first
-    const hardwareSupport = await VideoEncoder.isConfigSupported(encoderConfig);
+    let selectedCodec = codec;
+    let selectedConfig: VideoEncoderConfig | null = null;
+    let useHardware = false;
     
-    if (hardwareSupport.supported) {
-      // Use hardware encoding
-      console.log('[VideoExporter] Using hardware acceleration');
-      this.hardwareAcceleration = true;
-      this.encoder.configure(encoderConfig);
-    } else {
-      // Fall back to software encoding
-      console.log('[VideoExporter] Hardware not supported, using software encoding');
-      this.hardwareAcceleration = false;
-      encoderConfig.hardwareAcceleration = 'prefer-software';
+    // Try hardware acceleration first
+    for (const testCodec of codecProfiles) {
+      const encoderConfig: VideoEncoderConfig = {
+        codec: testCodec,
+        width: this.config.width,
+        height: this.config.height,
+        bitrate: this.config.bitrate,
+        framerate: this.config.frameRate,
+        latencyMode: 'realtime',
+        bitrateMode: 'variable',
+        hardwareAcceleration: 'prefer-hardware',
+      };
       
-      const softwareSupport = await VideoEncoder.isConfigSupported(encoderConfig);
-      if (!softwareSupport.supported) {
-        throw new Error('Video encoding not supported on this system');
+      const support = await VideoEncoder.isConfigSupported(encoderConfig);
+      
+      if (support.supported) {
+        selectedCodec = testCodec;
+        selectedConfig = encoderConfig;
+        useHardware = true;
+        break;
       }
-      
-      this.encoder.configure(encoderConfig);
+    }
+    
+    // If hardware not available, try software encoding
+    if (!selectedConfig) {
+      for (const testCodec of codecProfiles) {
+        const encoderConfig: VideoEncoderConfig = {
+          codec: testCodec,
+          width: this.config.width,
+          height: this.config.height,
+          bitrate: this.config.bitrate,
+          framerate: this.config.frameRate,
+          latencyMode: 'realtime',
+          bitrateMode: 'variable',
+          hardwareAcceleration: 'prefer-software',
+        };
+        
+        const support = await VideoEncoder.isConfigSupported(encoderConfig);
+        
+        if (support.supported) {
+          selectedCodec = testCodec;
+          selectedConfig = encoderConfig;
+          useHardware = false;
+          break;
+        }
+      }
+    }
+    
+    if (selectedConfig) {
+      if (useHardware) {
+        console.log(`[VideoExporter] ✅ GPU hardware acceleration enabled with codec: ${selectedCodec}`);
+      } else {
+        console.log(`[VideoExporter] ⚠️ Using WebCodecs software encoding with codec: ${selectedCodec}`);
+      }
+      console.log(`[VideoExporter] 📊 Encoder config: ${selectedConfig.width}x${selectedConfig.height} @ ${selectedConfig.framerate}fps, bitrate: ${selectedConfig.bitrate}`);
+      this.hardwareAcceleration = useHardware;
+      this.encoder.configure(selectedConfig);
+    } else {
+      throw new Error('No supported codec profile found (neither hardware nor software)');
     }
   }
 

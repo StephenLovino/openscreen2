@@ -10,11 +10,17 @@ export async function getAssetPath(relativePath: string): Promise<string> {
 
       const base = await apiBridge.getAssetBasePath();
       if (base) {
-        const normalized = base.replace(/\\/g, '/')
-        return `file://${normalized}/${relativePath}`
+        // Normalize path: replace backslashes with forward slashes, remove trailing slashes
+        const normalizedBase = base.replace(/\\/g, '/').replace(/\/+$/, '')
+        // Ensure relativePath doesn't start with a slash
+        const normalizedRelative = relativePath.replace(/^\//, '')
+        // Construct file:// URL, ensuring no double slashes
+        const fullPath = `${normalizedBase}/${normalizedRelative}`.replace(/\/+/g, '/')
+        return `file://${fullPath}`
       }
     }
   } catch (err) {
+    console.error('[getAssetPath] Error resolving path:', err)
     // ignore and use fallback
   }
 

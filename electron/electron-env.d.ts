@@ -27,6 +27,7 @@ interface Window {
     getSources: (opts: Electron.SourcesOptions) => Promise<ProcessedDesktopSource[]>
     switchToEditor: () => Promise<void>
     openSourceSelector: (mode?: 'screen' | 'camera') => Promise<void>
+    openSettings: () => Promise<void>
     selectSource: (source: any) => Promise<any>
     getSelectedSource: () => Promise<any>
     storeRecordedVideo: (videoData: ArrayBuffer, fileName: string) => Promise<{ success: boolean; path?: string; message?: string }>
@@ -53,6 +54,15 @@ interface Window {
     waitForCameraWarningDialogResponse?: () => Promise<'continue' | 'cancel'>
     send?: (channel: string, data?: any) => void
     closeWindow?: () => void
+    saveProjectData?: (projectData: any) => Promise<{ success: boolean; path?: string; error?: string }>
+    openProject?: () => void
+    // AHA Innovations API methods
+    uploadToAha?: (fileDataOrPath: ArrayBuffer | string, fileName: string) => Promise<{ success: boolean; mediaId?: string; url?: string; error?: string }>
+    getAhaMediaUrl?: (mediaId: string) => Promise<{ success: boolean; url?: string; error?: string }>
+    verifyAhaConfig?: (apiKey?: string) => Promise<{ valid: boolean; error?: string }>
+    saveAhaConfig?: (apiKey: string, subaccountId?: string) => Promise<{ success: boolean; error?: string }>
+    getAhaConfig?: () => Promise<{ hasConfig: boolean; subaccountId?: string }>
+    deleteAhaConfig?: () => Promise<{ success: boolean; error?: string }>
   }
 }
 

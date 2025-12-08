@@ -229,12 +229,14 @@ export class GifExporter {
         frames.push(frame);
         frameIndex++;
 
-        // Update progress
+        // Update progress more frequently for better accuracy
+        // Use 0-90% for frame rendering, 90-100% for encoding
         if (this.config.onProgress) {
+          const frameProgress = (frameIndex / totalFrames) * 90; // 0-90% for frames
           this.config.onProgress({
             currentFrame: frameIndex,
             totalFrames,
-            percentage: (frameIndex / totalFrames) * 100,
+            percentage: Math.min(90, frameProgress),
             estimatedTimeRemaining: 0, // GIF export is typically fast
           });
         }
@@ -246,12 +248,12 @@ export class GifExporter {
         return { success: false, error: 'Export cancelled' };
       }
 
-      // Update progress to indicate encoding is starting
+      // Update progress to indicate encoding is starting (90%)
       if (this.config.onProgress) {
         this.config.onProgress({
           currentFrame: totalFrames,
           totalFrames,
-          percentage: 95, // Set to 95% to indicate encoding phase
+          percentage: 90, // Set to 90% to indicate encoding phase starting
           estimatedTimeRemaining: 0,
         });
       }
@@ -349,12 +351,12 @@ export class GifExporter {
       
       gif.on('progress', (p: number) => {
         console.log('[GifExporter] GIF encoding progress:', (p * 100).toFixed(1) + '%');
-        // Update progress during encoding
+        // Update progress during encoding (90-100%)
         if (onProgress) {
           onProgress({
-            currentFrame: Math.floor(totalFrames * p),
+            currentFrame: totalFrames,
             totalFrames,
-            percentage: 95 + (p * 5), // 95-100% during encoding
+            percentage: 90 + (p * 10), // 90-100% during encoding
             estimatedTimeRemaining: 0,
           });
         }

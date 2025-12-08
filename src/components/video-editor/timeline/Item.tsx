@@ -1,7 +1,7 @@
 import { useItem } from "dnd-timeline";
 import type { Span } from "dnd-timeline";
 import { cn } from "@/lib/utils";
-import { ZoomIn, Scissors } from "lucide-react";
+import { ZoomIn, Scissors, X } from "lucide-react";
 import glassStyles from "./ItemGlass.module.css";
 
 interface ItemProps {
@@ -11,6 +11,7 @@ interface ItemProps {
   children: React.ReactNode;
   isSelected?: boolean;
   onSelect?: () => void;
+  onDelete?: () => void;
   zoomDepth?: number;
   variant?: 'zoom' | 'trim';
 }
@@ -30,7 +31,8 @@ export default function Item({
   span, 
   rowId, 
   isSelected = false, 
-  onSelect, 
+  onSelect,
+  onDelete,
   zoomDepth = 1,
   variant = 'zoom' 
 }: ItemProps) {
@@ -43,6 +45,11 @@ export default function Item({
   const isZoom = variant === 'zoom';
   const glassClass = isZoom ? glassStyles.glassGreen : glassStyles.glassRed;
   const endCapColor = isZoom ? '#21916A' : '#ef4444';
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onDelete?.();
+  };
 
   return (
     <div
@@ -94,6 +101,24 @@ export default function Item({
               </>
             )}
           </div>
+          {/* Delete button - appears on hover or when selected */}
+          {onDelete && (
+            <button
+              onClick={handleDelete}
+              className={cn(
+                "absolute right-1 top-1/2 -translate-y-1/2 z-20",
+                "w-5 h-5 rounded-full bg-red-500/20 hover:bg-red-500/40",
+                "flex items-center justify-center",
+                "opacity-0 group-hover:opacity-100 transition-opacity",
+                "border border-red-500/30 hover:border-red-500/50",
+                "cursor-pointer"
+              )}
+              title="Delete (or press Ctrl+D / Cmd+D)"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <X className="w-3 h-3 text-red-400" />
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import Colorful from '@uiw/react-color-colorful';
 import { hsvaToHex } from '@uiw/color-convert';
-import { Trash2, Download, Crop, X, Upload, Circle, Square, RectangleHorizontal } from "lucide-react";
+import { Trash2, Download, Crop, X, Upload, Circle, Square, RectangleHorizontal, Cloud, CloudOff, Save } from "lucide-react";
 import { toast } from "sonner";
 import type { ZoomDepth, CropRegion } from "./types";
 import { CropControl } from "./CropControl";
@@ -80,10 +80,17 @@ interface SettingsPanelProps {
   exportFrameRate?: number | null;
   onExportFrameRateChange?: (frameRate: number | null) => void;
   hardwareAcceleration?: boolean | null;
+  preferGpuAcceleration?: boolean;
+  onPreferGpuAccelerationChange?: (prefer: boolean) => void;
   exportPlatform?: 'custom' | 'facebook' | 'helpscout';
   onExportPlatformChange?: (platform: 'custom' | 'facebook' | 'helpscout') => void;
   videoDuration?: number; // in seconds, for size estimation
   trimRegions?: Array<{ startMs: number; endMs: number }>; // for effective duration calculation
+  shareViaUrl?: boolean;
+  onShareViaUrlChange?: (enabled: boolean) => void;
+  saveLocalCopy?: boolean;
+  onSaveLocalCopyChange?: (enabled: boolean) => void;
+  onOpenAhaConfig?: () => void;
 }
 
 export default SettingsPanel;
@@ -97,10 +104,57 @@ const ZOOM_DEPTH_OPTIONS: Array<{ depth: ZoomDepth; label: string }> = [
   { depth: 6, label: "5×" },
 ];
 
-export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, onZoomDepthChange, selectedZoomId, onZoomDelete, shadowIntensity = 0, onShadowChange, showBlur, onBlurChange, motionBlurEnabled = true, onMotionBlurChange, borderRadius = 0, onBorderRadiusChange, padding = 50, onPaddingChange, cropRegion, onCropChange, hideCamera = false, onHideCameraChange, cameraShape = 'squircle', onCameraShapeChange, cameraSize = 150, onCameraSizeChange, videoElement, onExport, exportResolution = '1080p', onExportResolutionChange, exportFormat = 'mp4', onExportFormatChange, exportBitrate = null, onExportBitrateChange, exportFrameRate = null, onExportFrameRateChange, hardwareAcceleration = null, exportPlatform = 'custom', onExportPlatformChange, videoDuration = 0, trimRegions = [] }: SettingsPanelProps) {
+export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, onZoomDepthChange, selectedZoomId, onZoomDelete, shadowIntensity = 0, onShadowChange, showBlur, onBlurChange, motionBlurEnabled = true, onMotionBlurChange, borderRadius = 0, onBorderRadiusChange, padding = 50, onPaddingChange, cropRegion, onCropChange, hideCamera = false, onHideCameraChange, cameraShape = 'squircle', onCameraShapeChange, cameraSize = 150, onCameraSizeChange, videoElement, onExport, exportResolution = '1080p', onExportResolutionChange, exportFormat = 'mp4', onExportFormatChange, exportBitrate = null, onExportBitrateChange, exportFrameRate = null, onExportFrameRateChange, hardwareAcceleration = null, preferGpuAcceleration = true, onPreferGpuAccelerationChange, exportPlatform = 'custom', onExportPlatformChange, videoDuration = 0, trimRegions = [], shareViaUrl = false, onShareViaUrlChange, saveLocalCopy = true, onSaveLocalCopyChange, onOpenAhaConfig }: SettingsPanelProps) {
   const [wallpaperPaths, setWallpaperPaths] = useState<string[]>([]);
   const [customImages, setCustomImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [hasAhaConfig, setHasAhaConfig] = useState(false);
+
+  // Check if AHA config exists
+  useEffect(() => {
+    const checkAhaConfig = async () => {
+      try {
+        const config = await apiBridge.getAhaConfig();
+        setHasAhaConfig(config.hasConfig);
+      } catch (error) {
+        console.error('Error checking AHA config:', error);
+        setHasAhaConfig(false);
+      }
+    };
+    
+    // Check immediately
+    checkAhaConfig();
+    
+    // Check when window regains focus (e.g., after configuring in Settings window)
+    const handleFocus = () => {
+      checkAhaConfig();
+    };
+    window.addEventListener('focus', handleFocus);
+    
+    // Check when document becomes visible (e.g., after switching back from Settings window)
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        checkAhaConfig();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Check when AHA config is updated (from dialog in same window)
+    const handleConfigUpdated = () => {
+      checkAhaConfig();
+    };
+    window.addEventListener('aha-config-updated', handleConfigUpdated);
+    
+    // Also check more frequently to catch changes from Settings window
+    const interval = setInterval(checkAhaConfig, 500);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('aha-config-updated', handleConfigUpdated);
+    };
+  }, []);
 
   // Calculate effective duration (excluding trim regions)
   const getEffectiveDuration = (): number => {
@@ -133,11 +187,23 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
     if (effectiveDuration <= 0) return 0;
 
     if (exportFormat === 'gif') {
-      // GIF size estimation: roughly 1-5 KB per frame depending on complexity
-      // Use a conservative estimate of 2 KB per frame
+      // GIF size estimation: depends on resolution and frame count
+      // Higher resolution = larger file size per frame
+      const res = getResolutionDimensions(exportResolution);
+      const totalPixels = res.width * res.height;
       const fps = exportFrameRate || 30;
       const totalFrames = Math.ceil(effectiveDuration * fps);
-      const estimatedSizeBytes = totalFrames * 2 * 1024; // 2 KB per frame
+      
+      // Estimate bytes per frame based on resolution
+      // Rough estimates: 480p ~50KB, 720p ~150KB, 1080p ~400KB per frame
+      let bytesPerFrame = 50_000; // Default for 480p
+      if (totalPixels > 854 * 480 && totalPixels <= 1280 * 720) {
+        bytesPerFrame = 150_000; // 720p
+      } else if (totalPixels > 1280 * 720) {
+        bytesPerFrame = 400_000; // 1080p and above
+      }
+      
+      const estimatedSizeBytes = totalFrames * bytesPerFrame;
       return estimatedSizeBytes;
     } else {
       // Video size estimation: bitrate * duration
@@ -166,11 +232,12 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
   const PLATFORM_LIMITS: Record<string, number> = {
     facebook: 25 * 1024 * 1024, // 25 MB
     helpscout: 10 * 1024 * 1024, // 10 MB
+    aha: 25 * 1024 * 1024, // 25 MB
   };
 
   // Auto-configure settings based on platform - maximize quality within limit
   useEffect(() => {
-    if (exportPlatform === 'custom' || !onExportResolutionChange || !onExportBitrateChange || !onExportFrameRateChange) {
+    if (exportPlatform === 'custom' || !onExportResolutionChange || !onExportFrameRateChange) {
       return;
     }
 
@@ -183,53 +250,90 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
     // Target 98% of limit to maximize quality while staying safely under
     const targetSizeBytes = limit * 0.98;
 
-    // Try resolutions from highest to lowest quality
-    const resolutions: Array<'1080p' | '720p' | '480p'> = ['1080p', '720p', '480p'];
-    const fpsOptions = [60, 30, 25]; // Try higher FPS first for better quality
+    if (exportFormat === 'gif') {
+      // GIF auto-configuration: adjust resolution and FPS
+      const resolutions: Array<'1080p' | '720p' | '480p'> = ['1080p', '720p', '480p'];
+      const fpsOptions = [30, 25, 20, 15]; // Lower FPS for GIF to reduce size
+      
+      // Estimate bytes per frame for each resolution
+      const bytesPerFrame: Record<string, number> = {
+        '1080p': 400_000,
+        '720p': 150_000,
+        '480p': 50_000,
+      };
 
-    // Find the best configuration that maximizes quality
-    for (const resolution of resolutions) {
-      for (const fps of fpsOptions) {
-        // Calculate required bitrate to hit target size
-        // size = (bitrate * duration / 8) * 1.1
-        // bitrate = (size * 8) / (duration * 1.1)
-        const requiredBitrate = (targetSizeBytes * 8) / (effectiveDuration * 1.1);
-        
-        // Define reasonable bitrate ranges per resolution
-        const bitrateRanges: Record<string, { min: number; max: number }> = {
-          '1080p': { min: 5_000_000, max: 50_000_000 }, // 5-50 Mbps
-          '720p': { min: 3_000_000, max: 25_000_000 },  // 3-25 Mbps
-          '480p': { min: 2_000_000, max: 15_000_000 },  // 2-15 Mbps
-        };
-
-        const range = bitrateRanges[resolution];
-        const optimalBitrate = Math.max(range.min, Math.min(range.max, requiredBitrate));
-
-        // Test if this configuration fits
-        const testSize = (optimalBitrate * effectiveDuration / 8) * 1.1;
-        
-        if (testSize <= limit) {
-          // This configuration fits! Use it (highest quality that fits)
-          onExportResolutionChange(resolution);
-          onExportFrameRateChange(fps);
-          onExportBitrateChange(Math.round(optimalBitrate));
-          return;
+      // Find the best configuration that maximizes quality
+      for (const resolution of resolutions) {
+        for (const fps of fpsOptions) {
+          const totalFrames = Math.ceil(effectiveDuration * fps);
+          const testSize = totalFrames * bytesPerFrame[resolution];
+          
+          if (testSize <= limit) {
+            // This configuration fits! Use it (highest quality that fits)
+            onExportResolutionChange(resolution);
+            onExportFrameRateChange(fps);
+            return;
+          }
         }
       }
-    }
 
-    // Fallback: if nothing fits, use the most conservative settings
-    // This should rarely happen, but handle edge cases
-    onExportResolutionChange('480p');
-    onExportFrameRateChange(25);
-    const fallbackBitrate = Math.max(2_000_000, (targetSizeBytes * 8) / (effectiveDuration * 1.1));
-    onExportBitrateChange(Math.round(Math.min(15_000_000, fallbackBitrate)));
+      // Fallback: use most conservative settings
+      onExportResolutionChange('480p');
+      onExportFrameRateChange(15);
+    } else {
+      // MP4 auto-configuration: adjust resolution, FPS, and bitrate
+      if (!onExportBitrateChange) return;
+      
+      const resolutions: Array<'1080p' | '720p' | '480p'> = ['1080p', '720p', '480p'];
+      const fpsOptions = [60, 30, 25]; // Try higher FPS first for better quality
+
+      // Find the best configuration that maximizes quality
+      for (const resolution of resolutions) {
+        for (const fps of fpsOptions) {
+          // Calculate required bitrate to hit target size
+          // size = (bitrate * duration / 8) * 1.1
+          // bitrate = (size * 8) / (duration * 1.1)
+          const requiredBitrate = (targetSizeBytes * 8) / (effectiveDuration * 1.1);
+          
+          // Define reasonable bitrate ranges per resolution
+          const bitrateRanges: Record<string, { min: number; max: number }> = {
+            '1080p': { min: 5_000_000, max: 50_000_000 }, // 5-50 Mbps
+            '720p': { min: 3_000_000, max: 25_000_000 },  // 3-25 Mbps
+            '480p': { min: 2_000_000, max: 15_000_000 },  // 2-15 Mbps
+          };
+
+          const range = bitrateRanges[resolution];
+          const optimalBitrate = Math.max(range.min, Math.min(range.max, requiredBitrate));
+
+          // Test if this configuration fits
+          const testSize = (optimalBitrate * effectiveDuration / 8) * 1.1;
+          
+          if (testSize <= limit) {
+            // This configuration fits! Use it (highest quality that fits)
+            onExportResolutionChange(resolution);
+            onExportFrameRateChange(fps);
+            onExportBitrateChange(Math.round(optimalBitrate));
+            return;
+          }
+        }
+      }
+
+      // Fallback: if nothing fits, use the most conservative settings
+      onExportResolutionChange('480p');
+      onExportFrameRateChange(25);
+      const fallbackBitrate = Math.max(2_000_000, (targetSizeBytes * 8) / (effectiveDuration * 1.1));
+      onExportBitrateChange(Math.round(Math.min(15_000_000, fallbackBitrate)));
+    }
   }, [exportPlatform, videoDuration, trimRegions, exportFormat]);
 
   const estimatedSize = estimateFileSize();
   const platformLimit = exportPlatform !== 'custom' ? PLATFORM_LIMITS[exportPlatform] : null;
   const exceedsLimit = platformLimit && estimatedSize > platformLimit;
   const effectiveDuration = getEffectiveDuration();
+  
+  // Check AHA upload limit when shareViaUrl is enabled
+  const AHA_LIMIT = 25 * 1024 * 1024; // 25 MB
+  const exceedsAhaLimit = shareViaUrl && estimatedSize > AHA_LIMIT;
 
   useEffect(() => {
     let mounted = true
@@ -873,31 +977,43 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
           </div>
         )}
 
-        {/* Hardware Acceleration Status */}
-        {exportFormat === 'mp4' && hardwareAcceleration !== null && (
+        {/* GPU Acceleration Toggle */}
+        {exportFormat === 'mp4' && (
           <div className="mb-4">
             <div className="p-3 rounded-xl bg-white/5 border border-white/5">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-medium text-slate-200">Hardware Acceleration</div>
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <div className="text-xs font-medium text-slate-200">GPU Acceleration</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    {preferGpuAcceleration 
+                      ? 'Will use GPU if available (faster)' 
+                      : 'Will use CPU encoding (more stable)'}
+                  </div>
+                </div>
+                {onPreferGpuAccelerationChange && (
+                  <Switch
+                    checked={preferGpuAcceleration}
+                    onCheckedChange={onPreferGpuAccelerationChange}
+                  />
+                )}
+              </div>
+              {/* Show current status if known */}
+              {hardwareAcceleration !== null && (
+                <div className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5">
+                  <div className="text-[10px] text-slate-400">Current:</div>
                   {hardwareAcceleration ? (
                     <>
                       <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                      <span className="text-[10px] text-green-400 font-medium">GPU</span>
+                      <span className="text-[10px] text-green-400 font-medium">GPU Active</span>
                     </>
                   ) : (
                     <>
                       <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
-                      <span className="text-[10px] text-yellow-400 font-medium">CPU</span>
+                      <span className="text-[10px] text-yellow-400 font-medium">CPU Active</span>
                     </>
                   )}
                 </div>
-              </div>
-              <div className="text-[10px] text-slate-500 mt-1">
-                {hardwareAcceleration 
-                  ? 'Using GPU encoding for faster export' 
-                  : 'Using CPU encoding (GPU not available)'}
-              </div>
+              )}
             </div>
           </div>
         )}
@@ -920,7 +1036,7 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
               </div>
               {platformLimit && (
                 <div className="text-[10px] text-slate-500 mb-2">
-                  {exportPlatform === 'facebook' ? 'Facebook' : 'HelpScout'} limit: {(platformLimit / (1024 * 1024)).toFixed(0)} MB
+                  {exportPlatform === 'facebook' ? 'Facebook' : exportPlatform === 'helpscout' ? 'HelpScout' : exportPlatform === 'aha' ? 'AHA Innovations' : 'Platform'} limit: {(platformLimit / (1024 * 1024)).toFixed(0)} MB
                 </div>
               )}
               {exceedsLimit && (
@@ -939,6 +1055,89 @@ export function SettingsPanel({ selected, onWallpaperChange, selectedZoomDepth, 
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Cloud Export / Share via URL */}
+        {onShareViaUrlChange && (
+          <div className="mb-4 space-y-3">
+            {hasAhaConfig ? (
+              <>
+                <div className="flex items-center justify-between bg-white/5 rounded-xl p-3 border border-white/5">
+                  <div className="flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-slate-400" />
+                    <div>
+                      <div className="text-xs font-medium text-slate-200">Share via URL</div>
+                      <div className="text-[10px] text-slate-500">Upload to AHA Innovations and get shareable link</div>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={shareViaUrl}
+                    onCheckedChange={onShareViaUrlChange}
+                    className="data-[state=checked]:bg-[#DA1F26]"
+                  />
+                </div>
+                
+                {/* Save Local Copy Option - Only show when Share via URL is enabled */}
+                {shareViaUrl && onSaveLocalCopyChange && (
+                  <div className="flex items-center justify-between bg-white/5 rounded-xl p-3 border border-white/5 ml-4">
+                    <div className="flex items-center gap-2">
+                      <Download className="w-4 h-4 text-slate-400" />
+                      <div>
+                        <div className="text-xs font-medium text-slate-200">Save Local Copy</div>
+                        <div className="text-[10px] text-slate-500">Also save file to your computer</div>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={saveLocalCopy}
+                      onCheckedChange={onSaveLocalCopyChange}
+                      className="data-[state=checked]:bg-[#DA1F26]"
+                    />
+                  </div>
+                )}
+                
+                {/* AHA Upload Size Warning - Show when shareViaUrl is enabled and file exceeds 25 MB */}
+                {exceedsAhaLimit && videoDuration > 0 && (
+                  <div className="ml-4 mt-2 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
+                    <div className="flex items-start gap-2">
+                      <div className="text-yellow-400 text-sm mt-0.5">⚠️</div>
+                      <div className="flex-1">
+                        <div className="text-xs font-medium text-yellow-400 mb-1">
+                          File size exceeds AHA upload limit
+                        </div>
+                        <div className="text-[10px] text-yellow-300/80">
+                          Estimated size: {(estimatedSize / (1024 * 1024)).toFixed(1)} MB (limit: 25 MB). 
+                          The file will be rejected if it exceeds 25 MB. Consider reducing resolution, 
+                          frame rate, or trimming the video to ensure successful upload.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CloudOff className="w-4 h-4 text-slate-500" />
+                    <div>
+                      <div className="text-xs font-medium text-slate-200">Share via URL</div>
+                      <div className="text-[10px] text-slate-500">Connect AHA account to enable</div>
+                    </div>
+                  </div>
+                  {onOpenAhaConfig && (
+                    <Button
+                      onClick={onOpenAhaConfig}
+                      size="sm"
+                      variant="outline"
+                      className="text-xs border-zinc-700 text-zinc-400 hover:bg-zinc-800"
+                    >
+                      Setup
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

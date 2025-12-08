@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSourceSelector: (mode?: 'screen' | 'camera') => {
     return ipcRenderer.invoke('open-source-selector', mode)
   },
+  openSettings: () => {
+    return ipcRenderer.invoke('open-settings')
+  },
   selectSource: (source: any) => {
     return ipcRenderer.invoke('select-source', source)
   },
@@ -112,5 +115,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   saveProjectData: (projectData: any) => {
     return ipcRenderer.invoke('save-project-data', projectData)
+  },
+  openProject: () => {
+    return ipcRenderer.send('menu-open-project')
+  },
+  // AHA Innovations API methods
+  uploadToAha: (fileDataOrPath: ArrayBuffer | string, fileName: string) => {
+    return ipcRenderer.invoke('upload-to-aha', fileDataOrPath, fileName)
+  },
+  getAhaMediaUrl: (mediaId: string) => {
+    return ipcRenderer.invoke('get-aha-media-url', mediaId)
+  },
+  verifyAhaConfig: (apiKey?: string) => {
+    return ipcRenderer.invoke('verify-aha-config', apiKey)
+  },
+  saveAhaConfig: (apiKey: string, subaccountId?: string) => {
+    return ipcRenderer.invoke('save-aha-config', apiKey, subaccountId)
+  },
+  getAhaConfig: () => {
+    return ipcRenderer.invoke('get-aha-config')
+  },
+  deleteAhaConfig: () => {
+    return ipcRenderer.invoke('delete-aha-config')
   },
 })

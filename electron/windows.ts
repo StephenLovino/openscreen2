@@ -254,6 +254,39 @@ export function createCameraPreviewWindow(): BrowserWindow {
   return win
 }
 
+export function createSettingsWindow(): BrowserWindow {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  
+  const win = new BrowserWindow({
+    width: 600,
+    height: 500,
+    minWidth: 500,
+    minHeight: 400,
+    x: Math.round((width - 600) / 2),
+    y: Math.round((height - 500) / 2),
+    frame: true,
+    resizable: true,
+    alwaysOnTop: false,
+    backgroundColor: '#09090b',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.mjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+    title: 'Settings - AHA Clips',
+  })
+
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(`${VITE_DEV_SERVER_URL}?windowType=settings`)
+  } else {
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'), { 
+      query: { windowType: 'settings' } 
+    })
+  }
+
+  return win
+}
+
 export function createCameraWarningDialogWindow(): BrowserWindow {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
   

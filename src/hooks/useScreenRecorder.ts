@@ -39,7 +39,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       }
       cameraRecorder.current.stop();
     }
-    setRecording(false);
+      setRecording(false);
     await apiBridge.setRecordingState(false, false); // Disable auto-zoom when stopping
     
     // Check if auto-zoom events were stored before cleaning up
@@ -59,12 +59,12 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       autoZoomCleanupRef.current();
       autoZoomCleanupRef.current = null;
     }
-    
-    // Stop camera stream and close preview when recording stops
-    if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach(track => track.stop());
-      cameraStreamRef.current = null;
-    }
+      
+      // Stop camera stream and close preview when recording stops
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach(track => track.stop());
+        cameraStreamRef.current = null;
+      }
     
     // Clean up AudioContext if it was used for mixing
     if (audioContextRef.current) {
@@ -77,7 +77,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       audioContextRef.current = null;
     }
     
-    await apiBridge.closeCameraPreview();
+      await apiBridge.closeCameraPreview();
   });
 
   useEffect(() => {
@@ -208,7 +208,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       let screenStream: MediaStream | null = null;
       let cameraStream: MediaStream | null = null;
       
-        // Get screen stream if screen source exists
+      // Get screen stream if screen source exists
         if (foundScreenSource) {
           const screenAudioConfig = (foundScreenSource as any).audioConfig;
         const shouldCaptureSystemAudio = screenAudioConfig?.mediaEnabled;
@@ -294,16 +294,16 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
             }
           } else {
             // No system audio requested, just get video
-            screenStream = await (navigator.mediaDevices as any).getUserMedia({
-              audio: false,
-              video: {
-                mandatory: {
-                  chromeMediaSource: "desktop",
+          screenStream = await (navigator.mediaDevices as any).getUserMedia({
+            audio: false,
+            video: {
+              mandatory: {
+                chromeMediaSource: "desktop",
                   chromeMediaSourceId: foundScreenSource.id,
-                  frameRate: { ideal: 60, max: 60 }
-                },
+                frameRate: { ideal: 60, max: 60 }
               },
-            });
+            },
+          });
           }
         }
         
@@ -429,8 +429,8 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
           // Remove all existing audio tracks from mediaStream
           mediaStream.getAudioTracks().forEach(track => {
             mediaStream.removeTrack(track);
-          });
-          
+        });
+        
           // Create AudioContext to mix audio tracks
           const audioContext = new AudioContext();
           audioContextRef.current = audioContext; // Store for cleanup
@@ -441,7 +441,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
           }
           
           const destination = audioContext.createMediaStreamDestination();
-          
+        
           // Connect all audio tracks to the destination (mixing them)
           allAudioTracks.forEach(track => {
             if (track.enabled && track.readyState === 'live') {
@@ -454,7 +454,7 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
               }
             }
           });
-          
+        
           // Add the mixed audio track to the mediaStream
           const mixedAudioTrack = destination.stream.getAudioTracks()[0];
           if (mixedAudioTrack) {
@@ -636,12 +636,12 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
           if (chunks.current.length > 0) {
             const buggyBlob = new Blob(chunks.current, { type: mimeType });
             chunks.current = [];
-            const videoBlob = await fixWebmDuration(buggyBlob, duration);
-            const arrayBuffer = await videoBlob.arrayBuffer();
-            const videoResult = await apiBridge.storeRecordedVideo(arrayBuffer, videoFileName);
-            if (!videoResult.success) {
-              console.error('Failed to store video:', videoResult.message);
-              return;
+          const videoBlob = await fixWebmDuration(buggyBlob, duration);
+          const arrayBuffer = await videoBlob.arrayBuffer();
+          const videoResult = await apiBridge.storeRecordedVideo(arrayBuffer, videoFileName);
+          if (!videoResult.success) {
+            console.error('Failed to store video:', videoResult.message);
+            return;
             }
           }
 

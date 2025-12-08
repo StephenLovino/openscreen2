@@ -4,6 +4,7 @@ import { SourceSelector } from "./components/launch/SourceSelector";
 import { CameraPreview } from "./components/launch/CameraPreview";
 import { CameraWarningDialog } from "./components/launch/CameraWarningDialog";
 import VideoEditor from "./components/video-editor/VideoEditor";
+import { SettingsWindow } from "./components/launch/SettingsWindow";
 
 export default function App() {
   const [windowType, setWindowType] = useState('');
@@ -12,7 +13,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const type = params.get('windowType') || '';
     setWindowType(type);
-    if (type === 'hud-overlay' || type === 'source-selector' || type === 'camera-preview' || type === 'camera-warning-dialog') {
+    if (type === 'hud-overlay' || type === 'source-selector' || type === 'camera-preview' || type === 'camera-warning-dialog' || type === 'settings') {
       document.body.style.background = 'transparent';
       document.documentElement.style.background = 'transparent';
       const root = document.getElementById('root');
@@ -34,6 +35,8 @@ export default function App() {
       return <CameraPreview />;
     case 'camera-warning-dialog':
       return <CameraWarningDialog />;
+    case 'settings':
+      return <SettingsWindow />;
     case 'editor':
       return <VideoEditor />;
       default:

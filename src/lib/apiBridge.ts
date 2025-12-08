@@ -244,6 +244,16 @@ export const apiBridge = {
       window.location.href = `/?windowType=source-selector&mode=${mode}`;
     }
   },
+  async openSettings(): Promise<void> {
+    if (isElectron()) {
+      if (window.electronAPI?.openSettings) {
+        await window.electronAPI.openSettings();
+      }
+    } else {
+      // Web: Navigate to settings
+      window.location.href = '/?windowType=settings';
+    }
+  },
 
   // Open video file picker
   async openVideoFilePicker(): Promise<{ success: boolean; path?: string; cancelled?: boolean; file?: File }> {
@@ -469,6 +479,43 @@ export const apiBridge = {
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
+  },
+  // AHA Innovations API methods
+  async uploadToAha(fileData: ArrayBuffer, fileName: string): Promise<{ success: boolean; mediaId?: string; url?: string; error?: string }> {
+    if (isElectron() && window.electronAPI?.uploadToAha) {
+      return await window.electronAPI.uploadToAha(fileData, fileName);
+    }
+    return { success: false, error: 'AHA upload not supported in web environment' };
+  },
+  async getAhaMediaUrl(mediaId: string): Promise<{ success: boolean; url?: string; error?: string }> {
+    if (isElectron() && window.electronAPI?.getAhaMediaUrl) {
+      return await window.electronAPI.getAhaMediaUrl(mediaId);
+    }
+    return { success: false, error: 'AHA API not supported in web environment' };
+  },
+  async verifyAhaConfig(apiKey?: string): Promise<{ valid: boolean; error?: string }> {
+    if (isElectron() && window.electronAPI?.verifyAhaConfig) {
+      return await window.electronAPI.verifyAhaConfig(apiKey);
+    }
+    return { valid: false, error: 'AHA config not supported in web environment' };
+  },
+  async saveAhaConfig(apiKey: string, subaccountId?: string): Promise<{ success: boolean; error?: string }> {
+    if (isElectron() && window.electronAPI?.saveAhaConfig) {
+      return await window.electronAPI.saveAhaConfig(apiKey, subaccountId);
+    }
+    return { success: false, error: 'AHA config not supported in web environment' };
+  },
+  async getAhaConfig(): Promise<{ hasConfig: boolean; subaccountId?: string }> {
+    if (isElectron() && window.electronAPI?.getAhaConfig) {
+      return await window.electronAPI.getAhaConfig();
+    }
+    return { hasConfig: false };
+  },
+  async deleteAhaConfig(): Promise<{ success: boolean; error?: string }> {
+    if (isElectron() && window.electronAPI?.deleteAhaConfig) {
+      return await window.electronAPI.deleteAhaConfig();
+    }
+    return { success: false, error: 'AHA config not supported in web environment' };
   },
 };
 

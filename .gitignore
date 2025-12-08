@@ -24,4 +24,7 @@ dist-ssr
 *.sw?
 release/**
 
+# AHA Config (stored in user's app data directory, but adding for safety)
+aha-config.json
+
 # npx electron-builder --mac --win

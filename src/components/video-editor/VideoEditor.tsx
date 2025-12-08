@@ -10,6 +10,8 @@ import PlaybackControls from "./PlaybackControls";
 import TimelineEditor from "./timeline/TimelineEditor";
 import { SettingsPanel } from "./SettingsPanel";
 import { ExportDialog } from "./ExportDialog";
+import { AhaConfigDialog } from "./AhaConfigDialog";
+import { ShareUrlDialog } from "./ShareUrlDialog";
 
 import type { Span } from "dnd-timeline";
 import {
@@ -61,7 +63,18 @@ export default function VideoEditor() {
   const [exportBitrate, setExportBitrate] = useState<number | null>(null); // null = auto
   const [exportFrameRate, setExportFrameRate] = useState<number | null>(null); // null = auto (60 for video, 30 for GIF)
   const [hardwareAcceleration, setHardwareAcceleration] = useState<boolean | null>(null); // null = unknown
+  const [preferGpuAcceleration, setPreferGpuAcceleration] = useState<boolean>(() => {
+    // Load from localStorage, default to true (prefer GPU)
+    const saved = localStorage.getItem('preferGpuAcceleration');
+    return saved !== null ? saved === 'true' : true;
+  });
   const [exportPlatform, setExportPlatform] = useState<'custom' | 'facebook' | 'helpscout'>('custom');
+  const [shareViaUrl, setShareViaUrl] = useState(false);
+  const [saveLocalCopy, setSaveLocalCopy] = useState(true); // Default to true: save local copy when sharing via URL
+  const [showAhaConfigDialog, setShowAhaConfigDialog] = useState(false);
+  const [showShareUrlDialog, setShowShareUrlDialog] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
+  const [shareFileName, setShareFileName] = useState('');
 
   const videoPlaybackRef = useRef<VideoPlaybackRef>(null);
   const nextZoomIdRef = useRef(1);
@@ -152,16 +165,24 @@ export default function VideoEditor() {
             
             // Use nextZoomIdRef to ensure unique IDs that don't conflict with manual zooms
             const id = `zoom-auto-${nextZoomIdRef.current++}`;
+            // Ensure coordinates are properly normalized (0-1) and clamped
+            // The event.x and event.y should already be normalized from the recording
+            // but we'll ensure they're valid and account for any edge cases
+            const normalizedX = Math.max(0, Math.min(1, event.x || 0.5));
+            const normalizedY = Math.max(0, Math.min(1, event.y || 0.5));
+            
             const region: ZoomRegion = {
               id,
               startMs: event.timestamp,
               endMs: Math.min(event.timestamp + DEFAULT_ZOOM_DURATION, videoDurationMs),
               depth: 3 as const, // Default zoom depth
               focus: {
-                cx: Math.max(0, Math.min(1, event.x)), // Clamp to 0-1
-                cy: Math.max(0, Math.min(1, event.y)), // Clamp to 0-1
+                cx: normalizedX,
+                cy: normalizedY,
               },
             };
+            
+            console.log(`🔵 VideoEditor: Created zoom region with focus at (${normalizedX.toFixed(3)}, ${normalizedY.toFixed(3)}) from click event (${event.x}, ${event.y})`);
             console.log(`🔵 VideoEditor: Created zoom region ${autoZoomRegions.length + 1}/${sortedEvents.length} from event:`, region);
             autoZoomRegions.push(region);
             lastZoomEndMs = region.endMs;
@@ -690,6 +711,108 @@ export default function VideoEditor() {
       return;
     }
 
+    // Check if export size exceeds platform limit
+    if (exportPlatform !== 'custom') {
+      const PLATFORM_LIMITS: Record<string, number> = {
+        facebook: 25 * 1024 * 1024, // 25 MB
+        helpscout: 10 * 1024 * 1024, // 10 MB
+        aha: 25 * 1024 * 1024, // 25 MB
+      };
+      
+      const limit = PLATFORM_LIMITS[exportPlatform];
+      if (limit) {
+        // Calculate effective duration
+        const totalTrimDuration = trimRegions.reduce((sum, region) => {
+          return sum + (region.endMs - region.startMs) / 1000;
+        }, 0);
+        const effectiveDuration = duration - totalTrimDuration;
+        
+        // Estimate file size
+        let estimatedSize = 0;
+        if (exportFormat === 'gif') {
+          const res = getResolutionDimensions(exportResolution);
+          const totalPixels = res.width * res.height;
+          const fps = exportFrameRate || 30;
+          const totalFrames = Math.ceil(effectiveDuration * fps);
+          
+          let bytesPerFrame = 50_000;
+          if (totalPixels > 854 * 480 && totalPixels <= 1280 * 720) {
+            bytesPerFrame = 150_000;
+          } else if (totalPixels > 1280 * 720) {
+            bytesPerFrame = 400_000;
+          }
+          estimatedSize = totalFrames * bytesPerFrame;
+        } else {
+          const res = getResolutionDimensions(exportResolution);
+          const totalPixels = res.width * res.height;
+          let bitrate = exportBitrate || 30_000_000;
+          if (!exportBitrate) {
+            if (totalPixels > 1920 * 1080 && totalPixels <= 2560 * 1440) {
+              bitrate = 50_000_000;
+            } else if (totalPixels > 2560 * 1440) {
+              bitrate = 80_000_000;
+            }
+          }
+          estimatedSize = (bitrate * effectiveDuration / 8) * 1.1;
+        }
+        
+        if (estimatedSize > limit) {
+          const sizeMB = (estimatedSize / (1024 * 1024)).toFixed(1);
+          const limitMB = (limit / (1024 * 1024)).toFixed(0);
+          const platformName = exportPlatform === 'facebook' ? 'Facebook' : exportPlatform === 'helpscout' ? 'HelpScout' : 'AHA Innovations';
+          toast.error(
+            `Estimated file size (${sizeMB} MB) exceeds ${platformName} limit (${limitMB} MB). Please reduce resolution, frame rate, or trim the video.`,
+            { duration: 6000 }
+          );
+          return;
+        }
+      }
+    }
+    
+    // Also check file size if shareViaUrl is enabled (AHA upload)
+    if (shareViaUrl) {
+      const AHA_LIMIT = 25 * 1024 * 1024; // 25 MB
+      const totalTrimDuration = trimRegions.reduce((sum, region) => {
+        return sum + (region.endMs - region.startMs) / 1000;
+      }, 0);
+      const effectiveDuration = duration - totalTrimDuration;
+      
+      // Estimate file size
+      let estimatedSize = 0;
+      if (exportFormat === 'gif') {
+        const res = getResolutionDimensions(exportResolution);
+        const totalPixels = res.width * res.height;
+        const fps = exportFrameRate || 30;
+        const totalFrames = Math.ceil(effectiveDuration * fps);
+        
+        let bytesPerFrame = 50_000;
+        if (totalPixels > 854 * 480 && totalPixels <= 1280 * 720) {
+          bytesPerFrame = 150_000;
+        } else if (totalPixels > 1280 * 720) {
+          bytesPerFrame = 400_000;
+        }
+        estimatedSize = totalFrames * bytesPerFrame;
+      } else {
+        const res = getResolutionDimensions(exportResolution);
+        const totalPixels = res.width * res.height;
+        let bitrate = exportBitrate || 30_000_000;
+        if (!exportBitrate) {
+          if (totalPixels > 1920 * 1080 && totalPixels <= 2560 * 1440) {
+            bitrate = 50_000_000;
+          } else if (totalPixels > 2560 * 1440) {
+            bitrate = 80_000_000;
+          }
+        }
+        estimatedSize = (bitrate * effectiveDuration / 8) * 1.1;
+      }
+      
+      // Note: We don't show a warning here since the user already saw the warning in the settings panel
+      // and has presumably adjusted settings. We'll check the actual file size after export.
+      if (estimatedSize > AHA_LIMIT) {
+        console.warn(`[VideoEditor] Estimated file size exceeds AHA limit, but continuing export. User has been warned in settings panel.`);
+      }
+    }
+
     setShowExportDialog(true);
     setIsExporting(true);
     setExportProgress(null);
@@ -809,6 +932,7 @@ export default function VideoEditor() {
           borderRadius,
           padding,
           cropRegion,
+          preferGpuAcceleration: preferGpuAcceleration,
           onProgress: (progress: ExportProgress) => {
             setExportProgress(progress);
           },
@@ -828,18 +952,107 @@ export default function VideoEditor() {
         console.log('[VideoEditor] Export successful, blob size:', result.blob.size, 'type:', result.blob.type);
         const arrayBuffer = await result.blob.arrayBuffer();
         console.log('[VideoEditor] ArrayBuffer created, size:', arrayBuffer.byteLength);
-        console.log('[VideoEditor] Calling saveExportedVideo with fileName:', fileName);
         
-        const saveResult = await apiBridge.saveExportedVideo(arrayBuffer, fileName);
-        console.log('[VideoEditor] Save result:', saveResult);
-        
-        if (saveResult.cancelled) {
-          toast.info('Export cancelled');
-        } else if (saveResult.success) {
-          toast.success(`${exportFormat === 'gif' ? 'GIF' : 'Video'} exported successfully to ${saveResult.path}`);
+        // If sharing via URL, upload first (don't save locally unless upload fails or saveLocalCopy is enabled)
+        if (shareViaUrl) {
+          const AHA_LIMIT = 25 * 1024 * 1024; // 25 MB
+          const fileSize = arrayBuffer.byteLength;
+          
+          // Check actual file size before upload
+          if (fileSize > AHA_LIMIT) {
+            const sizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+            toast.error(
+              `File size (${sizeMB} MB) exceeds AHA Innovations upload limit (25 MB). Please reduce resolution, frame rate, or trim the video and export again.`,
+              { duration: 8000 }
+            );
+            setExportError(`File too large for upload (${sizeMB} MB). Maximum allowed: 25 MB.`);
+          } else {
+            console.log('[VideoEditor] Uploading to AHA Innovations...');
+            setExportProgress({
+              currentFrame: 0,
+              totalFrames: 0,
+              percentage: 100, // Show as complete, but we're uploading
+              estimatedTimeRemaining: 0,
+            });
+            
+            try {
+              const uploadResult = await apiBridge.uploadToAha(arrayBuffer, fileName);
+              
+              if (uploadResult.success && uploadResult.url) {
+                setShareUrl(uploadResult.url);
+                setShareFileName(fileName);
+                setShowShareUrlDialog(true);
+                
+                // Save locally only if saveLocalCopy is enabled
+                if (saveLocalCopy) {
+                  try {
+                    const saveResult = await apiBridge.saveExportedVideo(arrayBuffer, fileName);
+                    if (saveResult.success && saveResult.path) {
+                      toast.success('File uploaded to AHA Innovations and saved locally!');
+                    } else if (!saveResult.cancelled) {
+                      toast.warning('File uploaded to AHA Innovations, but failed to save locally');
+                    }
+                  } catch (saveError) {
+                    console.error('[VideoEditor] Error saving local copy:', saveError);
+                    toast.warning('File uploaded to AHA Innovations, but failed to save locally');
+                  }
+                } else {
+                  toast.success('File uploaded to AHA Innovations!');
+                }
+              } else {
+                // Upload failed - offer to save locally
+                const errorMessage = uploadResult.error || 'Failed to upload to AHA Innovations';
+                toast.error(errorMessage, { duration: 6000 });
+                
+                // Offer to save locally as fallback
+                try {
+                  const saveResult = await apiBridge.saveExportedVideo(arrayBuffer, fileName);
+                  if (saveResult.success && saveResult.path) {
+                    toast.success(`Upload failed, but file saved locally to ${saveResult.path}`);
+                  } else if (!saveResult.cancelled) {
+                    toast.error('Upload failed and could not save locally');
+                  }
+                } catch (saveError) {
+                  console.error('[VideoEditor] Error saving local copy after upload failure:', saveError);
+                  toast.error('Upload failed and could not save locally');
+                }
+              }
+            } catch (error) {
+              console.error('[VideoEditor] Upload error:', error);
+              toast.error('Failed to upload to AHA Innovations');
+              
+              // Offer to save locally as fallback
+              try {
+                const saveResult = await apiBridge.saveExportedVideo(arrayBuffer, fileName);
+                if (saveResult.success && saveResult.path) {
+                  toast.success(`Upload failed, but file saved locally to ${saveResult.path}`);
+                } else if (!saveResult.cancelled) {
+                  toast.error('Upload failed and could not save locally');
+                }
+              } catch (saveError) {
+                console.error('[VideoEditor] Error saving local copy after upload failure:', saveError);
+                toast.error('Upload failed and could not save locally');
+              }
+            }
+          }
         } else {
-          setExportError(`Failed to save ${exportFormat === 'gif' ? 'GIF' : 'video'}`);
-          toast.error(`Failed to save ${exportFormat === 'gif' ? 'GIF' : 'video'}`);
+          // Not sharing via URL - save locally as normal export
+          console.log('[VideoEditor] Calling saveExportedVideo with fileName:', fileName);
+          const saveResult = await apiBridge.saveExportedVideo(arrayBuffer, fileName);
+          console.log('[VideoEditor] Save result:', saveResult);
+          
+          if (saveResult.cancelled) {
+            toast.info('Export cancelled');
+            return;
+          } else if (!saveResult.success) {
+            setExportError(`Failed to save ${exportFormat === 'gif' ? 'GIF' : 'video'}`);
+            toast.error(`Failed to save ${exportFormat === 'gif' ? 'GIF' : 'video'}`);
+            return;
+          }
+          
+          if (saveResult.success && saveResult.path) {
+            toast.success(`${exportFormat === 'gif' ? 'GIF' : 'Video'} exported successfully to ${saveResult.path}`);
+          }
         }
       } else {
         console.error('[VideoEditor] Export failed:', result.error);
@@ -859,7 +1072,7 @@ export default function VideoEditor() {
       setIsExporting(false);
       exporterRef.current = null;
     }
-  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, isPlaying, exportResolution, exportFormat, hideCamera, cameraSize, cameraPosition, cameraShape]);
+  }, [videoPath, wallpaper, zoomRegions, trimRegions, shadowIntensity, showBlur, motionBlurEnabled, borderRadius, padding, cropRegion, isPlaying, exportResolution, exportFormat, hideCamera, cameraSize, cameraPosition, cameraShape, shareViaUrl, saveLocalCopy]);
 
   const handleCancelExport = useCallback(() => {
     if (exporterRef.current) {
@@ -1029,10 +1242,20 @@ export default function VideoEditor() {
           exportFrameRate={exportFrameRate}
           onExportFrameRateChange={setExportFrameRate}
           hardwareAcceleration={hardwareAcceleration}
+          preferGpuAcceleration={preferGpuAcceleration}
+          onPreferGpuAccelerationChange={(prefer) => {
+            setPreferGpuAcceleration(prefer);
+            localStorage.setItem('preferGpuAcceleration', String(prefer));
+          }}
           exportPlatform={exportPlatform}
           onExportPlatformChange={setExportPlatform}
           videoDuration={duration}
           trimRegions={trimRegions}
+          shareViaUrl={shareViaUrl}
+          onShareViaUrlChange={setShareViaUrl}
+          saveLocalCopy={saveLocalCopy}
+          onSaveLocalCopyChange={setSaveLocalCopy}
+          onOpenAhaConfig={() => setShowAhaConfigDialog(true)}
         />
       </div>
 
@@ -1046,6 +1269,24 @@ export default function VideoEditor() {
         error={exportError}
         exportFormat={exportFormat}
         onCancel={handleCancelExport}
+      />
+
+      <AhaConfigDialog
+        isOpen={showAhaConfigDialog}
+        onClose={() => {
+          setShowAhaConfigDialog(false);
+        }}
+        onConfigUpdated={() => {
+          // Trigger a refresh in SettingsPanel by dispatching a custom event
+          window.dispatchEvent(new Event('aha-config-updated'));
+        }}
+      />
+
+      <ShareUrlDialog
+        isOpen={showShareUrlDialog}
+        onClose={() => setShowShareUrlDialog(false)}
+        shareUrl={shareUrl}
+        fileName={shareFileName}
       />
     </div>
   );

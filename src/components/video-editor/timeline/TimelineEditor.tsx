@@ -309,6 +309,8 @@ function Timeline({
   onSeek,
   onSelectZoom,
   onSelectTrim,
+  onZoomDelete,
+  onTrimDelete,
   selectedZoomId,
   selectedTrimId,
 }: {
@@ -319,6 +321,8 @@ function Timeline({
   onSeek?: (time: number) => void;
   onSelectZoom?: (id: string | null) => void;
   onSelectTrim?: (id: string | null) => void;
+  onZoomDelete?: (id: string) => void;
+  onTrimDelete?: (id: string) => void;
   selectedZoomId: string | null;
   selectedTrimId?: string | null;
 }) {
@@ -367,6 +371,7 @@ function Timeline({
             span={item.span}
             isSelected={item.id === selectedZoomId}
             onSelect={() => onSelectZoom?.(item.id)}
+            onDelete={onZoomDelete ? () => onZoomDelete(item.id) : undefined}
             zoomDepth={item.zoomDepth}
             variant="zoom"
           >
@@ -384,6 +389,7 @@ function Timeline({
             span={item.span}
             isSelected={item.id === selectedTrimId}
             onSelect={() => onSelectTrim?.(item.id)}
+            onDelete={onTrimDelete ? () => onTrimDelete(item.id) : undefined}
             variant="trim"
           >
             {item.label}
@@ -721,6 +727,8 @@ export default function TimelineEditor({
             onSeek={onSeek}
             onSelectZoom={onSelectZoom}
             onSelectTrim={onSelectTrim}
+            onZoomDelete={onZoomDelete}
+            onTrimDelete={onTrimDelete}
             selectedZoomId={selectedZoomId}
             selectedTrimId={selectedTrimId}
           />

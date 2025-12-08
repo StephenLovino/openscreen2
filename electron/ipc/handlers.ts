@@ -4,6 +4,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RECORDINGS_DIR } from '../main'
+import { readAhaConfig, saveAhaConfig, deleteAhaConfig, hasAhaConfig } from '../config/ahaConfig'
+import { uploadMedia, getMediaUrl, verifyApiKey } from '../api/highlevelApi'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -22,7 +24,8 @@ export function registerIpcHandlers(
   closeCameraPreviewWindow?: () => void,
   createCameraWarningDialogWindow?: () => BrowserWindow,
   closeCameraWarningDialogWindow?: () => void,
-  getCameraWarningDialogWindow?: () => BrowserWindow | null
+  getCameraWarningDialogWindow?: () => BrowserWindow | null,
+  createSettingsWindow?: () => BrowserWindow
 ) {
   ipcMain.handle('get-sources', async (_, opts) => {
     const sources = await desktopCapturer.getSources(opts)
@@ -134,7 +137,11 @@ export function registerIpcHandlers(
     createEditorWindow()
   })
 
-
+  ipcMain.handle('open-settings', () => {
+    if (createSettingsWindow) {
+      createSettingsWindow()
+    }
+  })
 
   ipcMain.handle('store-recorded-video', async (_, videoData: ArrayBuffer, fileName: string) => {
     try {
@@ -197,10 +204,27 @@ export function registerIpcHandlers(
     lastClickTime = now;
     
     const relativeTime = now - recordingStartTime;
-    const normalizedX = screenBounds ? x / screenBounds.width : 0.5;
-    const normalizedY = screenBounds ? y / screenBounds.height : 0.5;
     
-    console.log('🔵 Auto-zoom: Mouse click detected at:', { x: normalizedX, y: normalizedY, time: relativeTime, absolute: { x, y } });
+    // Normalize coordinates relative to screen bounds
+    // Note: This assumes the video source matches the screen dimensions
+    // For window-specific sources, coordinates might need adjustment when video loads
+    let normalizedX = 0.5;
+    let normalizedY = 0.5;
+    
+    if (screenBounds && screenBounds.width > 0 && screenBounds.height > 0) {
+      // Clamp coordinates to screen bounds and normalize to 0-1
+      const clampedX = Math.max(0, Math.min(screenBounds.width, x));
+      const clampedY = Math.max(0, Math.min(screenBounds.height, y));
+      normalizedX = clampedX / screenBounds.width;
+      normalizedY = clampedY / screenBounds.height;
+    }
+    
+    console.log('🔵 Auto-zoom: Mouse click detected at:', { 
+      normalized: { x: normalizedX, y: normalizedY }, 
+      absolute: { x, y },
+      screenBounds,
+      time: relativeTime 
+    });
     
     // Send click event to renderer (HUD overlay window)
     const mainWin = getMainWindow();
@@ -636,9 +660,11 @@ export function registerIpcHandlers(
   ipcMain.handle('get-asset-base-path', () => {
     try {
       if (app.isPackaged) {
+        // In packaged app, extraResources are in process.resourcesPath/assets/wallpapers
         return path.join(process.resourcesPath, 'assets')
       }
-      return path.join(app.getAppPath(), 'public', 'assets')
+      // In development, wallpapers are in public/wallpapers
+      return path.join(app.getAppPath(), 'public')
     } catch (err) {
       console.error('Failed to resolve asset base path:', err)
       return null
@@ -964,6 +990,173 @@ export function registerIpcHandlers(
     } catch (error) {
       console.error('Failed to save project:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  // AHA Innovations API handlers
+  ipcMain.handle('upload-to-aha', async (_, fileDataOrPath: ArrayBuffer | string, fileName: string) => {
+    try {
+      const config = await readAhaConfig();
+      if (!config) {
+        return {
+          success: false,
+          error: 'AHA account not configured. Please set up your account first.',
+        };
+      }
+
+      let filePath: string;
+      let shouldCleanup = false;
+      let fileSize: number;
+
+      // If ArrayBuffer, save to temp file first
+      if (fileDataOrPath instanceof ArrayBuffer) {
+        fileSize = fileDataOrPath.byteLength;
+        const tempDir = app.getPath('temp');
+        const tempFilePath = path.join(tempDir, `aha-upload-${Date.now()}-${fileName}`);
+        await fs.writeFile(tempFilePath, Buffer.from(fileDataOrPath));
+        filePath = tempFilePath;
+        shouldCleanup = true;
+      } else {
+        filePath = fileDataOrPath;
+        const stats = await fs.stat(filePath);
+        fileSize = stats.size;
+      }
+
+      // Check file size before upload (AHA limit is 25 MB)
+      const AHA_LIMIT = 25 * 1024 * 1024; // 25 MB
+      if (fileSize > AHA_LIMIT) {
+        const sizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+        return {
+          success: false,
+          error: `File size (${sizeMB} MB) exceeds AHA Innovations upload limit (25 MB). Please reduce resolution, frame rate, or trim the video and export again.`,
+        };
+      }
+
+      try {
+        const result = await uploadMedia(filePath, fileName, config.apiKey, config.subaccountId);
+        return result;
+      } finally {
+        // Clean up temp file if we created it
+        if (shouldCleanup) {
+          try {
+            await fs.unlink(filePath);
+          } catch (error) {
+            console.warn('[IPC] Failed to cleanup temp file:', error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[IPC] Error uploading to AHA:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  });
+
+  ipcMain.handle('get-aha-media-url', async (_, mediaId: string) => {
+    try {
+      const config = await readAhaConfig();
+      if (!config) {
+        return {
+          success: false,
+          error: 'AHA account not configured. Please set up your account first.',
+        };
+      }
+
+      const result = await getMediaUrl(mediaId, config.apiKey);
+      return result;
+    } catch (error) {
+      console.error('[IPC] Error getting AHA media URL:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  });
+
+  ipcMain.handle('verify-aha-config', async (_, apiKey?: string) => {
+    try {
+      // If API key is provided, use it directly (for verification before saving)
+      // Otherwise, load from config (for verification after saving)
+      let keyToVerify = apiKey;
+      if (!keyToVerify) {
+        const config = await readAhaConfig();
+        if (!config) {
+          return {
+            valid: false,
+            error: 'AHA account not configured.',
+          };
+        }
+        keyToVerify = config.apiKey;
+      }
+
+      const result = await verifyApiKey(keyToVerify);
+      return result;
+    } catch (error) {
+      console.error('[IPC] Error verifying AHA config:', error);
+      return {
+        valid: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  });
+
+  ipcMain.handle('save-aha-config', async (_, apiKey: string, subaccountId?: string) => {
+    try {
+      const config = { apiKey, subaccountId };
+      const success = await saveAhaConfig(config);
+      
+      if (success) {
+        return { success: true };
+      } else {
+        return {
+          success: false,
+          error: 'Failed to save configuration',
+        };
+      }
+    } catch (error) {
+      console.error('[IPC] Error saving AHA config:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  });
+
+  ipcMain.handle('get-aha-config', async () => {
+    try {
+      const hasConfig = await hasAhaConfig();
+      if (!hasConfig) {
+        return { hasConfig: false };
+      }
+
+      const config = await readAhaConfig();
+      if (!config) {
+        return { hasConfig: false };
+      }
+
+      // Return config without API key for security
+      return {
+        hasConfig: true,
+        subaccountId: config.subaccountId,
+      };
+    } catch (error) {
+      console.error('[IPC] Error getting AHA config:', error);
+      return { hasConfig: false };
+    }
+  });
+
+  ipcMain.handle('delete-aha-config', async () => {
+    try {
+      const success = await deleteAhaConfig();
+      return { success };
+    } catch (error) {
+      console.error('[IPC] Error deleting AHA config:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
     }
   });
 }
