@@ -113,19 +113,29 @@ export default function VideoEditor() {
   }, []);
   
   // Load auto-zoom events after video is loaded (so we know the duration)
+  // This effect runs when duration changes AND on mount to catch events that were stored before the editor opened
   useEffect(() => {
-    console.log('🔵 VideoEditor: Checking for auto-zoom events, duration:', duration);
+    console.log('🔵 VideoEditor: Checking for auto-zoom events, duration:', duration, 'videoPath:', videoPath);
     
     if (!duration || duration === 0) {
       console.log('🔵 VideoEditor: Duration not available yet, skipping auto-zoom load');
       return; // Wait for video to load
     }
     
-    try {
-      const eventsStr = localStorage.getItem('autoZoomEvents');
-      console.log('🔵 VideoEditor: Found autoZoomEvents in localStorage:', eventsStr ? 'yes' : 'no');
-      
-      if (eventsStr) {
+    if (!videoPath) {
+      console.log('🔵 VideoEditor: Video path not available yet, skipping auto-zoom load');
+      return; // Wait for video path
+    }
+    
+    const loadAutoZoomEvents = () => {
+      try {
+        const eventsStr = localStorage.getItem('autoZoomEvents');
+        console.log('🔵 VideoEditor: Found autoZoomEvents in localStorage:', eventsStr ? `yes (${eventsStr.length} chars)` : 'no');
+        if (eventsStr) {
+          console.log('🔵 VideoEditor: Raw events string:', eventsStr);
+        }
+        
+        if (eventsStr) {
         const events = JSON.parse(eventsStr);
         console.log('🔵 VideoEditor: Parsed events:', events);
         
@@ -213,10 +223,33 @@ export default function VideoEditor() {
       } else {
         console.log('🔵 VideoEditor: No autoZoomEvents found in localStorage');
       }
-    } catch (e) {
-      console.error('🔵 VideoEditor: Failed to load auto-zoom events from sessionStorage:', e);
-    }
-  }, [duration]); // Load when duration is available
+      } catch (e) {
+        console.error('🔵 VideoEditor: Failed to load auto-zoom events from localStorage:', e);
+      }
+    };
+    
+    // Load events immediately
+    loadAutoZoomEvents();
+    
+    // Also set up a listener to check for new events periodically (in case they arrive after video loads)
+    const checkInterval = setInterval(() => {
+      const eventsStr = localStorage.getItem('autoZoomEvents');
+      if (eventsStr) {
+        try {
+          const events = JSON.parse(eventsStr);
+          if (Array.isArray(events) && events.length > 0) {
+            console.log('🔵 VideoEditor: Found', events.length, 'auto-zoom events on periodic check, reloading...');
+            loadAutoZoomEvents();
+            clearInterval(checkInterval); // Stop checking once we find events
+          }
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+    }, 1000); // Check every second
+    
+    return () => clearInterval(checkInterval);
+  }, [duration, videoPath]); // Also check when videoPath changes (when video loads) // Load when duration is available
 
   useEffect(() => {
     async function loadVideo() {

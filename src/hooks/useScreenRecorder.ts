@@ -230,9 +230,56 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
             throw new Error("Desktop recording is only available in Electron");
           }
           
-          // Try to request audio directly with desktop capture first
-          // Some Electron versions/platforms may support this
-          if (shouldCaptureSystemAudio) {
+          // Detect macOS - on macOS, system audio capture via getUserMedia with chromeMediaSource doesn't work
+          // We need to use getDisplayMedia for system audio instead
+          // Check navigator.platform (works in both Electron and browser)
+          const platform = navigator.platform.toLowerCase();
+          const userAgent = navigator.userAgent.toLowerCase();
+          const isMacOS = platform.includes('mac') || 
+                         userAgent.includes('mac os') ||
+                         (typeof process !== 'undefined' && (process as any).platform === 'darwin');
+          
+          if (shouldCaptureSystemAudio && isMacOS) {
+            // macOS: Get video first, then use getDisplayMedia for system audio
+            console.log('🔵 useScreenRecorder: macOS detected - using getDisplayMedia for system audio');
+            screenStream = await (navigator.mediaDevices as any).getUserMedia({
+              audio: false,
+              video: {
+                mandatory: {
+                  chromeMediaSource: "desktop",
+                  chromeMediaSourceId: foundScreenSource.id,
+                  frameRate: { ideal: 60, max: 60 }
+                },
+              },
+            });
+            
+            // Get system audio using getDisplayMedia (works properly on macOS)
+            if (screenStream && shouldCaptureSystemAudio) {
+              const currentScreenStream = screenStream; // Capture for closure
+              try {
+                console.log('🔵 useScreenRecorder: Requesting system audio via getDisplayMedia on macOS');
+                const systemAudioStream = await navigator.mediaDevices.getDisplayMedia({
+                  video: false,
+                  audio: true
+                });
+                const systemAudioTracks = systemAudioStream.getAudioTracks();
+                console.log('🔵 useScreenRecorder: getDisplayMedia audio tracks:', systemAudioTracks.length);
+                if (systemAudioTracks.length > 0 && currentScreenStream) {
+                  systemAudioTracks.forEach(track => {
+                    currentScreenStream.addTrack(track);
+                  });
+                  audioTracksRef.current.push(...systemAudioTracks);
+                  globalAudioTracks.push(...systemAudioTracks);
+                  console.log('🔵 useScreenRecorder: Successfully added system audio tracks via getDisplayMedia on macOS');
+                }
+              } catch (displayMediaError) {
+                console.error('🔵 useScreenRecorder: getDisplayMedia for audio failed on macOS:', displayMediaError);
+                console.warn('🔵 useScreenRecorder: System audio capture not available. This may be a permission issue.');
+              }
+            }
+          } else if (shouldCaptureSystemAudio) {
+            // Non-macOS: Try to request audio directly with desktop capture first
+            // Some Electron versions/platforms may support this
             try {
               console.log('🔵 useScreenRecorder: Attempting to capture system audio with desktop source');
               screenStream = await (navigator.mediaDevices as any).getUserMedia({
@@ -679,27 +726,30 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
         }
       }
 
-      // Use larger timeslice to reduce recording overhead and improve smoothness
-      recorder.start(5000);
-      startTime.current = Date.now();
-      setRecording(true);
-      
       // Check if auto-zoom is enabled for screen recording
       const foundScreenSourceForZoom = sources.find(s => 
         s.type === 'screen' || s.id?.startsWith('screen:') || s.id?.startsWith('window:')
       );
       const autoZoomEnabled = foundScreenSourceForZoom?.autoZoomEnabled || false;
-      await apiBridge.setRecordingState(true, autoZoomEnabled);
       
-      // Set up click detection if auto-zoom is enabled
+      // IMPORTANT: Set up click detection listener BEFORE starting recording
+      // This ensures the listener is ready when the main process starts detecting clicks
       if (autoZoomEnabled && typeof window !== 'undefined' && window.electronAPI) {
-        console.log('🔵 useScreenRecorder: Auto-zoom enabled, setting up click detection');
+        console.log('🔵 useScreenRecorder: Auto-zoom enabled, setting up click detection listener FIRST');
         const cleanup = setupAutoZoomClickDetection();
         autoZoomCleanupRef.current = cleanup;
-        console.log('🔵 useScreenRecorder: Click detection setup complete');
+        console.log('🔵 useScreenRecorder: Click detection listener setup complete');
       } else {
         console.log('🔵 useScreenRecorder: Auto-zoom not enabled or electronAPI not available', { autoZoomEnabled, hasElectronAPI: typeof window !== 'undefined' && !!window.electronAPI });
       }
+      
+      // Use larger timeslice to reduce recording overhead and improve smoothness
+      recorder.start(5000);
+      startTime.current = Date.now();
+      setRecording(true);
+      
+      // Now tell main process to start click detection (listener is already set up)
+      await apiBridge.setRecordingState(true, autoZoomEnabled);
     } catch (error) {
       console.error('Failed to start recording:', error);
       setRecording(false);
@@ -719,7 +769,8 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
     
     // Listen for click events from Electron main process
     const handleClickEvent = (_event: any, data: { x: number; y: number; timestamp: number }) => {
-      console.log('🔵 useScreenRecorder: Received auto-zoom click event:', data);
+      console.log('🔵 useScreenRecorder: ⭐⭐⭐ IPC handler CALLED! Received auto-zoom click event:', data);
+      console.trace('🔵 useScreenRecorder: Stack trace for debugging');
       const recordingStartTime = startTime.current;
       // Use the timestamp from data (which is already relative to recording start from main process)
       // If not provided, calculate relative time
@@ -727,16 +778,31 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       
       // Store zoom event in localStorage (shared across windows)
       const eventsStr = localStorage.getItem('autoZoomEvents') || '[]';
-      const events = JSON.parse(eventsStr);
+      let events: any[] = [];
+      try {
+        events = JSON.parse(eventsStr);
+        if (!Array.isArray(events)) {
+          console.warn('🔵 useScreenRecorder: autoZoomEvents is not an array, resetting');
+          events = [];
+        }
+      } catch (e) {
+        console.error('🔵 useScreenRecorder: Failed to parse autoZoomEvents:', e);
+        events = [];
+      }
+      
       events.push({
         x: data.x,
         y: data.y,
         timestamp: relativeTime, // Relative to recording start in milliseconds
       });
-      localStorage.setItem('autoZoomEvents', JSON.stringify(events));
       
-      console.log('🔵 useScreenRecorder: Auto-zoom click stored:', { x: data.x, y: data.y, time: relativeTime, totalEvents: events.length });
-      console.log('🔵 useScreenRecorder: All events in localStorage:', JSON.stringify(events));
+      try {
+        localStorage.setItem('autoZoomEvents', JSON.stringify(events));
+        console.log('🔵 useScreenRecorder: Auto-zoom click stored:', { x: data.x, y: data.y, time: relativeTime, totalEvents: events.length });
+        console.log('🔵 useScreenRecorder: All events in localStorage:', JSON.stringify(events));
+      } catch (e) {
+        console.error('🔵 useScreenRecorder: Failed to store autoZoomEvents:', e);
+      }
     };
     
     // Set up IPC listener if in Electron
@@ -747,13 +813,41 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       console.log('🔵 useScreenRecorder: handleClickEvent function:', typeof handleClickEvent);
       
       try {
-        // Register the listener
-        electronAPI.on('auto-zoom-click-event', handleClickEvent);
-        console.log('🔵 useScreenRecorder: IPC listener registered successfully');
+        // Register the listener with explicit logging
+        console.log('🔵 useScreenRecorder: About to register IPC listener for channel: auto-zoom-click-event');
+        console.log('🔵 useScreenRecorder: electronAPI object:', electronAPI);
+        console.log('🔵 useScreenRecorder: electronAPI.on type:', typeof electronAPI.on);
+        
+        // Create a wrapper to track if handler is called
+        const wrappedHandler = (event: any, data: any) => {
+          console.log('🔵 useScreenRecorder: ⭐ IPC handler CALLED! Received event:', data);
+          handleClickEvent(event, data);
+        };
+        
+        electronAPI.on('auto-zoom-click-event', wrappedHandler);
+        console.log('🔵 useScreenRecorder: ✅ IPC listener registered successfully for auto-zoom-click-event');
+        console.log('🔵 useScreenRecorder: Listener is now active and waiting for events...');
         
         // Verify localStorage is initialized
         const testEvents = localStorage.getItem('autoZoomEvents');
         console.log('🔵 useScreenRecorder: Current autoZoomEvents in localStorage:', testEvents);
+        
+        // Verify the listener was actually registered by checking ipcRenderer listeners
+        // This is a sanity check
+        console.log('🔵 useScreenRecorder: Verifying IPC setup complete');
+        
+        // Test: Ask main process to send a test event after a short delay
+        setTimeout(() => {
+          console.log('🔵 useScreenRecorder: Requesting test event from main process...');
+          if (electronAPI?.send) {
+            electronAPI.send('test-auto-zoom-ipc', {});
+          } else {
+            console.error('🔵 useScreenRecorder: electronAPI.send not available!');
+          }
+        }, 1000);
+        
+        // Store wrapped handler for cleanup
+        (handleClickEvent as any).wrappedHandler = wrappedHandler;
       } catch (error) {
         console.error('🔵 useScreenRecorder: Error registering IPC listener:', error);
       }
@@ -765,16 +859,100 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
       });
     }
     
+    // Also set up global click listener as fallback for macOS (when native module isn't available)
+    // NOTE: This only captures clicks within the Electron window, not system-wide
+    // For full system-wide detection, the native module is required
+    const handleGlobalClick = async (event: MouseEvent) => {
+      if (!autoZoomCleanupRef.current) {
+        console.log('🔵 useScreenRecorder: Click detected but auto-zoom cleanup ref is null (disabled)');
+        return; // Only if auto-zoom is enabled
+      }
+      
+      const recordingStartTime = startTime.current;
+      const relativeTime = Date.now() - recordingStartTime;
+      
+      // Get click coordinates relative to screen
+      const x = event.screenX;
+      const y = event.screenY;
+      
+      console.log('🔵 useScreenRecorder: ⭐ Global click detected at screen coordinates:', { x, y, relativeTime });
+      console.log('🔵 useScreenRecorder: Click event details:', {
+        clientX: event.clientX,
+        clientY: event.clientY,
+        screenX: event.screenX,
+        screenY: event.screenY,
+        target: event.target,
+        currentTarget: event.currentTarget
+      });
+      
+      // Send click to main process for normalization
+      if (electronAPI?.send) {
+        try {
+          const timestamp = Date.now();
+          electronAPI.send('auto-zoom-click', { x, y, timestamp });
+          console.log('🔵 useScreenRecorder: ✅ Sent click to main process via IPC:', { x, y, timestamp });
+        } catch (error) {
+          console.error('🔵 useScreenRecorder: ❌ Error sending click to main process:', error);
+        }
+      } else {
+        console.error('🔵 useScreenRecorder: ❌ electronAPI.send not available!');
+      }
+    };
+    
+    // Add global click listener with capture phase to catch all clicks
+    // Also listen to mousedown to catch clicks that might not trigger 'click' event
+    const handleGlobalMouseDown = async (event: MouseEvent) => {
+      if (!autoZoomCleanupRef.current) return;
+      
+      // Only handle left mouse button clicks
+      if (event.button !== 0) return;
+      
+      const recordingStartTime = startTime.current;
+      const relativeTime = Date.now() - recordingStartTime;
+      const x = event.screenX;
+      const y = event.screenY;
+      
+      console.log('🔵 useScreenRecorder: ⭐ Global mousedown detected at screen coordinates:', { x, y, relativeTime });
+      
+      if (electronAPI?.send) {
+        try {
+          const timestamp = Date.now();
+          electronAPI.send('auto-zoom-click', { x, y, timestamp });
+          console.log('🔵 useScreenRecorder: ✅ Sent mousedown to main process via IPC:', { x, y, timestamp });
+        } catch (error) {
+          console.error('🔵 useScreenRecorder: ❌ Error sending mousedown to main process:', error);
+        }
+      }
+    };
+    
+    // Add listeners for both 'click' and 'mousedown' events
+    window.addEventListener('click', handleGlobalClick, true); // Use capture phase
+    window.addEventListener('mousedown', handleGlobalMouseDown, true); // Also catch mousedown
+    console.log('🔵 useScreenRecorder: Global click and mousedown listeners added');
+    
     // Return cleanup function
     return () => {
+      console.log('🔵 useScreenRecorder: Cleanup function called for auto-zoom');
       if (typeof window !== 'undefined' && electronAPI?.off) {
         console.log('🔵 useScreenRecorder: Cleaning up auto-zoom click detection listener');
         try {
-          electronAPI.off('auto-zoom-click-event', handleClickEvent);
+          // Try to remove the wrapped handler if it exists
+          const wrappedHandler = (handleClickEvent as any).wrappedHandler;
+          if (wrappedHandler) {
+            electronAPI.off('auto-zoom-click-event', wrappedHandler);
+            console.log('🔵 useScreenRecorder: Wrapped handler removed');
+          } else {
+            electronAPI.off('auto-zoom-click-event', handleClickEvent);
+            console.log('🔵 useScreenRecorder: Handler removed (no wrapper)');
+          }
         } catch (error) {
           console.error('🔵 useScreenRecorder: Error removing IPC listener:', error);
         }
       }
+      // Remove global click listeners
+      window.removeEventListener('click', handleGlobalClick, true);
+      window.removeEventListener('mousedown', handleGlobalMouseDown, true);
+      console.log('🔵 useScreenRecorder: Cleanup complete - removed click and mousedown listeners');
     };
   };
 

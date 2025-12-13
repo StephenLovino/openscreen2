@@ -40,7 +40,18 @@
     ],
     "icon": "icons/icons/mac/icon.icns",
     "artifactName": "${productName}-Mac-${arch}-${version}.${ext}",
-    "category": "public.app-category.utilities"
+    "category": "public.app-category.utilities",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false,
+    "entitlements": "build/entitlements.mac.plist",
+    "entitlementsInherit": "build/entitlements.mac.plist",
+    "extendInfo": {
+      "CFBundleName": "AHA Clips",
+      "CFBundleDisplayName": "AHA Clips",
+      "NSCameraUsageDescription": "AHA Clips needs access to your camera to record video.",
+      "NSMicrophoneUsageDescription": "AHA Clips needs access to your microphone to record audio.",
+      "NSScreenRecordingUsageDescription": "AHA Clips needs access to record your screen."
+    }
   },
   "linux": {
     "target": [

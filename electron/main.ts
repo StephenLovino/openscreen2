@@ -90,6 +90,7 @@ let selectedSourceName = ''
 
 function createWindow() {
   mainWindow = createHudOverlayWindow()
+  // Menu is already set in app.whenReady(), so it should be accessible
 }
 
 function createTray() {
@@ -123,7 +124,7 @@ function createEditorWindowWrapper() {
     mainWindow = null
   }
   mainWindow = createEditorWindow()
-  // Set application menu for editor window
+  // Ensure menu is still set (it should already be set in app.whenReady, but refresh it)
   setEditorMenu()
 }
 
@@ -237,6 +238,19 @@ function setEditorMenu() {
 
   const menu = Menu.buildFromTemplate(template)
   Menu.setApplicationMenu(menu)
+  console.log('🔵 Menu: Application menu set with', template.length, 'top-level items')
+  
+  // On macOS, ensure menu is accessible even in fullscreen
+  if (process.platform === 'darwin') {
+    // The menu should automatically appear when mouse moves to top in fullscreen
+    // But we can verify it's set correctly
+    const currentMenu = Menu.getApplicationMenu()
+    if (currentMenu) {
+      console.log('🔵 Menu: Application menu is active and accessible')
+    } else {
+      console.warn('🔵 Menu: WARNING - Application menu is not set!')
+    }
+  }
 }
 
 function createSourceSelectorWindowWrapper(mode?: 'screen' | 'camera') {
@@ -346,6 +360,10 @@ app.on('activate', () => {
 
 // Register all IPC handlers when app is ready
 app.whenReady().then(async () => {
+    // Set application menu immediately so it's available from the start
+    // This ensures menu bar is accessible even with always-on-top windows
+    setEditorMenu()
+    
     // Listen for HUD overlay quit event (macOS only)
     const { ipcMain } = await import('electron');
     ipcMain.on('hud-overlay-close', () => {

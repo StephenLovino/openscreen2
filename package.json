@@ -22,7 +22,9 @@
     "build:linux": "vite build && electron-builder --linux",
     "build:all": "vite build && electron-builder --mac --win --linux",
     "build:win:portable": "tsc && vite build && electron-builder --win portable",
-    "build:linux:deb": "tsc && vite build && electron-builder --linux deb"
+    "build:linux:deb": "tsc && vite build && electron-builder --linux deb",
+    "build:native": "node-gyp rebuild --directory electron/native",
+    "rebuild:native": "node-gyp rebuild --directory electron/native"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",

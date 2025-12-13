@@ -52,10 +52,18 @@ export function createHudOverlayWindow(): BrowserWindow {
       backgroundThrottling: false,
     },
   })
+  
+  // Make the window ignore mouse events outside its bounds to allow menu bar interactions
+  // This allows clicks on the menu bar to work even though the window is always on top
+  win.setIgnoreMouseEvents(false) // Don't ignore - we need clicks for the HUD controls
 
 
   win.webContents.on('did-finish-load', () => {
     win?.webContents.send('main-process-message', (new Date).toLocaleString())
+    // Open DevTools in development mode for easier debugging
+    if (VITE_DEV_SERVER_URL) {
+      win.webContents.openDevTools()
+    }
   })
 
   hudOverlayWindow = win;

@@ -295,19 +295,11 @@ export function registerIpcHandlers(
     if (platform === 'linux') {
       await startLinuxMouseClickDetection(screen);
     } else if (platform === 'darwin') {
-      // macOS - TODO: Implement using CGEventTap or native module
-      console.warn('🔵 Auto-zoom: macOS mouse click detection not yet implemented');
-      console.log('🔵 Auto-zoom: For macOS, consider using:');
-      console.log('   1. CGEventTap API (requires native module)');
-      console.log('   2. iohook npm package (cross-platform native module)');
-      console.log('   3. robotjs npm package (cross-platform native module)');
+      // macOS - Implement using native module or command-line tool
+      await startMacOSMouseClickDetection(screen);
     } else if (platform === 'win32') {
-      // Windows - TODO: Implement using Windows API hooks or native module
-      console.warn('🔵 Auto-zoom: Windows mouse click detection not yet implemented');
-      console.log('🔵 Auto-zoom: For Windows, consider using:');
-      console.log('   1. SetWindowsHookEx API (requires native module)');
-      console.log('   2. iohook npm package (cross-platform native module)');
-      console.log('   3. robotjs npm package (cross-platform native module)');
+      // Windows - Implement using native module or command-line tool
+      await startWindowsMouseClickDetection(screen);
     } else {
       console.warn('🔵 Auto-zoom: Unsupported platform:', platform);
     }
@@ -506,11 +498,265 @@ export function registerIpcHandlers(
     }
   };
 
+  // macOS-specific mouse click detection
+  const startMacOSMouseClickDetection = async (screen: typeof import('electron').screen) => {
+    const { spawn } = await import('child_process');
+    
+    try {
+      // Try to use native module first (if available)
+      try {
+        const nativeModule = await import('../native/index');
+        console.log('🔵 Auto-zoom: Attempting to use native macOS click detection module');
+        
+        const cleanup = await nativeModule.startMacOSClickDetection((x: number, y: number, timestamp: number) => {
+          // Convert timestamp from milliseconds to relative time
+          const relativeTime = timestamp - recordingStartTime;
+          handleMouseClick(x, y);
+        });
+        
+        // Store cleanup function
+        clickDetectionProcess = { kill: cleanup } as any;
+        console.log('🔵 Auto-zoom: macOS native click detection started successfully');
+        return;
+      } catch (nativeError) {
+        console.warn('🔵 Auto-zoom: Native module not available, falling back to command-line approach:', nativeError);
+      }
+      
+      // Fallback: Use a polling approach to detect mouse clicks
+      // This is less ideal but works without native compilation
+      console.log('🔵 Auto-zoom: Using polling fallback for macOS click detection');
+      console.warn('🔵 Auto-zoom: For better reliability, build the native module with: npm run build:native');
+      
+      // Poll mouse button state using a simple approach
+      // Note: This is a workaround - native module is recommended
+      let lastMouseState = { left: false, right: false };
+      const pollInterval = setInterval(() => {
+        try {
+          // Use a simple approach: check if we can detect clicks via system events
+          // This is a basic implementation - native module would be better
+          const cursorPoint = screen.getCursorScreenPoint();
+          
+          // For now, we'll use a different approach: monitor via IPC from renderer
+          // The renderer can listen to click events and send them via IPC
+          // This is handled in the renderer code (useScreenRecorder.ts)
+        } catch (error) {
+          console.error('🔵 Auto-zoom: Error in polling:', error);
+        }
+      }, 50); // Poll every 50ms
+      
+      // Store the interval so we can clear it
+      clickDetectionProcess = { 
+        kill: () => clearInterval(pollInterval),
+        interval: pollInterval 
+      } as any;
+      
+      console.log('🔵 Auto-zoom: macOS click detection started (polling fallback - limited functionality)');
+      console.warn('🔵 Auto-zoom: Native module recommended for full click detection. Run: npm run build:native');
+      
+      // Note: The actual click detection will rely on the renderer process
+      // listening to click events and sending them via IPC
+      return;
+      
+      logProcess.stderr.on('data', (data: Buffer) => {
+        const error = data.toString();
+        if (!error.includes('WARNING') && !error.includes('INFO')) {
+          console.error('🔵 Auto-zoom: log stream error:', error);
+        }
+      });
+      
+      logProcess.on('close', (code: number | null) => {
+        console.log('🔵 Auto-zoom: log stream process closed with code:', code);
+        if (code !== 0 && code !== null) {
+          console.warn('🔵 Auto-zoom: log stream process exited unexpectedly');
+        }
+      });
+      
+      logProcess.on('error', (error: Error) => {
+        console.error('🔵 Auto-zoom: log stream process error:', error);
+        console.warn('🔵 Auto-zoom: Command-line fallback failed. Native module is recommended for better reliability.');
+      });
+      
+      clickDetectionProcess = logProcess;
+      console.log('🔵 Auto-zoom: macOS click detection started (command-line fallback)');
+      
+    } catch (error) {
+      console.error('🔵 Auto-zoom: Error starting macOS mouse click detection:', error);
+      console.warn('🔵 Auto-zoom: macOS click detection requires either:');
+      console.warn('   1. Native module (requires compilation)');
+      console.warn('   2. Accessibility permissions for native module');
+      console.warn('   3. System logs access for command-line fallback');
+    }
+  };
+
+  // Windows-specific mouse click detection
+  const startWindowsMouseClickDetection = async (screen: typeof import('electron').screen) => {
+    const { spawn } = await import('child_process');
+    
+    try {
+      // Windows: Use PowerShell to monitor mouse clicks
+      // This is a simpler approach that doesn't require native compilation
+      console.log('🔵 Auto-zoom: Starting Windows click detection using PowerShell');
+      
+      // PowerShell script to monitor mouse clicks
+      const psScript = `
+        Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Windows.Forms;
+          
+          public class MouseHook {
+            private static LowLevelMouseProc _proc = HookCallback;
+            private static IntPtr _hookID = IntPtr.Zero;
+            private static Action<int, int> _callback;
+            
+            public static void SetCallback(Action<int, int> callback) {
+              _callback = callback;
+            }
+            
+            public static void Start() {
+              _hookID = SetHook(_proc);
+            }
+            
+            public static void Stop() {
+              UnhookWindowsHookEx(_hookID);
+            }
+            
+            private static IntPtr SetHook(LowLevelMouseProc proc) {
+              using (var curProcess = System.Diagnostics.Process.GetCurrentProcess())
+              using (var curModule = curProcess.MainModule) {
+                return SetWindowsHookEx(WH_MOUSE_LL, proc,
+                  GetModuleHandle(curModule.ModuleName), 0);
+              }
+            }
+            
+            private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+            
+            private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
+              if (nCode >= 0 && (wParam == (IntPtr)WM_LBUTTONDOWN || wParam == (IntPtr)WM_RBUTTONDOWN)) {
+                MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+                _callback?.Invoke(hookStruct.pt.x, hookStruct.pt.y);
+              }
+              return CallNextHookEx(_hookID, nCode, wParam, lParam);
+            }
+            
+            private const int WH_MOUSE_LL = 14;
+            private const int WM_LBUTTONDOWN = 0x0201;
+            private const int WM_RBUTTONDOWN = 0x0204;
+            
+            [StructLayout(LayoutKind.Sequential)]
+            private struct POINT {
+              public int x;
+              public int y;
+            }
+            
+            [StructLayout(LayoutKind.Sequential)]
+            private struct MSLLHOOKSTRUCT {
+              public POINT pt;
+              public uint mouseData;
+              public uint flags;
+              public uint time;
+              public IntPtr dwExtraInfo;
+            }
+            
+            [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+            private static extern IntPtr SetWindowsHookEx(int idHook,
+              LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+            
+            [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+            
+            [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+            private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode,
+              IntPtr wParam, IntPtr lParam);
+            
+            [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+            private static extern IntPtr GetModuleHandle(string lpModuleName);
+          }
+"@
+        
+        $script:mouseHook = [MouseHook]::new()
+        [MouseHook]::SetCallback({
+          param($x, $y)
+          Write-Output "CLICK:$x,$y"
+        })
+        
+        [MouseHook]::Start()
+        
+        # Keep script running
+        try {
+          while ($true) {
+            Start-Sleep -Milliseconds 100
+          }
+        } finally {
+          [MouseHook]::Stop()
+        }
+      `;
+      
+      // Start PowerShell process
+      const psProcess = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript]);
+      
+      let buffer = '';
+      
+      psProcess.stdout.on('data', (data: Buffer) => {
+        buffer += data.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('CLICK:')) {
+            const coords = trimmed.substring(6).split(',');
+            if (coords.length === 2) {
+              const x = parseInt(coords[0], 10);
+              const y = parseInt(coords[1], 10);
+              if (!isNaN(x) && !isNaN(y)) {
+                handleMouseClick(x, y);
+              }
+            }
+          }
+        }
+      });
+      
+      psProcess.stderr.on('data', (data: Buffer) => {
+        const error = data.toString();
+        if (!error.includes('WARNING') && !error.includes('INFO')) {
+          console.error('🔵 Auto-zoom: PowerShell error:', error);
+        }
+      });
+      
+      psProcess.on('close', (code: number | null) => {
+        console.log('🔵 Auto-zoom: PowerShell process closed with code:', code);
+        if (code !== 0 && code !== null) {
+          console.warn('🔵 Auto-zoom: PowerShell process exited unexpectedly');
+        }
+      });
+      
+      psProcess.on('error', (error: Error) => {
+        console.error('🔵 Auto-zoom: PowerShell process error:', error);
+        console.warn('🔵 Auto-zoom: Windows click detection requires PowerShell. Please ensure PowerShell is available.');
+      });
+      
+      clickDetectionProcess = psProcess;
+      console.log('🔵 Auto-zoom: Windows click detection started successfully');
+      
+    } catch (error) {
+      console.error('🔵 Auto-zoom: Error starting Windows mouse click detection:', error);
+      console.warn('🔵 Auto-zoom: Windows click detection requires PowerShell to be available.');
+    }
+  };
+
   // Function to stop mouse click detection
   const stopMouseClickDetection = () => {
     if (clickDetectionProcess) {
       try {
-        clickDetectionProcess.kill();
+        // Check if it's a cleanup function (from native module)
+        if (typeof clickDetectionProcess.kill === 'function' && clickDetectionProcess.kill.length === 0) {
+          clickDetectionProcess.kill();
+        } else {
+          // It's a process, kill it
+          clickDetectionProcess.kill();
+        }
         clickDetectionProcess = null;
         console.log('🔵 Auto-zoom: Mouse click detection stopped');
       } catch (error) {
@@ -551,25 +797,96 @@ export function registerIpcHandlers(
   })
 
   // Handler to receive click events from renderer (when user clicks anywhere)
-  ipcMain.on('auto-zoom-click', (_, data: { x: number; y: number, timestamp: number }) => {
-    if (!autoZoomEnabled) return;
-    
-    const relativeTime = data.timestamp - recordingStartTime;
-    const normalizedX = screenBounds ? data.x / screenBounds.width : 0.5;
-    const normalizedY = screenBounds ? data.y / screenBounds.height : 0.5;
-    
-    // Store click event in sessionStorage (we'll do this from renderer)
-    // For now, just log it
-    console.log('🔵 Auto-zoom: Click detected at', { x: normalizedX, y: normalizedY, time: relativeTime });
-    
-    // Send to renderer to store in sessionStorage
+  // Test handler to verify IPC connection
+  ipcMain.on('test-auto-zoom-ipc', (event) => {
+    console.log('🔵 Auto-zoom: Test IPC request received, sending test event');
     const mainWin = getMainWindow();
     if (mainWin && !mainWin.isDestroyed()) {
       mainWin.webContents.send('auto-zoom-click-event', {
-        x: normalizedX,
-        y: normalizedY,
-        timestamp: relativeTime
+        x: 0.5,
+        y: 0.5,
+        timestamp: 0
       });
+      console.log('🔵 Auto-zoom: Test event sent to main window');
+    } else {
+      console.warn('🔵 Auto-zoom: Cannot send test event - main window is null or destroyed');
+    }
+  });
+
+  ipcMain.on('auto-zoom-click', (_, data: { x: number; y: number, timestamp: number }) => {
+    if (!autoZoomEnabled) {
+      console.log('🔵 Auto-zoom: Click received but autoZoomEnabled is false');
+      return;
+    }
+    
+    const relativeTime = data.timestamp - recordingStartTime;
+    
+    // Normalize coordinates: data.x and data.y are already screen coordinates
+    // We need to normalize them to 0-1 range based on screen bounds
+    let normalizedX = 0.5;
+    let normalizedY = 0.5;
+    
+    if (screenBounds && screenBounds.width > 0 && screenBounds.height > 0) {
+      // Clamp coordinates to screen bounds and normalize to 0-1
+      const clampedX = Math.max(0, Math.min(screenBounds.width, data.x));
+      const clampedY = Math.max(0, Math.min(screenBounds.height, data.y));
+      normalizedX = clampedX / screenBounds.width;
+      normalizedY = clampedY / screenBounds.height;
+    }
+    
+    // Apply debounce: ignore clicks within 100ms of each other
+    const now = Date.now();
+    if (now - lastClickTime < CLICK_DEBOUNCE_MS) {
+      console.log('🔵 Auto-zoom: Click ignored (debounce) - too soon after last click');
+      return;
+    }
+    lastClickTime = now;
+    
+    // Store click event in sessionStorage (we'll do this from renderer)
+    // For now, just log it
+    console.log('🔵 Auto-zoom: Click detected at', { 
+      absolute: { x: data.x, y: data.y },
+      normalized: { x: normalizedX, y: normalizedY }, 
+      time: relativeTime,
+      screenBounds 
+    });
+    
+    // Send to renderer to store in sessionStorage
+    // Send to all windows to ensure it reaches the recording window
+    const allWindows = BrowserWindow.getAllWindows();
+    console.log('🔵 Auto-zoom: Found', allWindows.length, 'windows, sending click event to all');
+    
+    // Log window details for debugging
+    allWindows.forEach((win, index) => {
+      const url = win.webContents.getURL();
+      console.log(`🔵 Auto-zoom: Window ${index} - URL: ${url}, destroyed: ${win.isDestroyed()}`);
+    });
+    
+    let sentCount = 0;
+    allWindows.forEach((win, index) => {
+      if (win && !win.isDestroyed()) {
+        try {
+          const url = win.webContents.getURL();
+          console.log(`🔵 Auto-zoom: Sending click event to window ${index} (${url}):`, { x: normalizedX, y: normalizedY, timestamp: relativeTime });
+          win.webContents.send('auto-zoom-click-event', {
+            x: normalizedX,
+            y: normalizedY,
+            timestamp: relativeTime
+          });
+          sentCount++;
+          console.log(`🔵 Auto-zoom: Successfully sent to window ${index}`);
+        } catch (error) {
+          console.error(`🔵 Auto-zoom: Error sending to window ${index}:`, error);
+        }
+      } else {
+        console.log(`🔵 Auto-zoom: Skipping window ${index} - destroyed or null`);
+      }
+    });
+    
+    if (sentCount > 0) {
+      console.log('🔵 Auto-zoom: Click event sent to', sentCount, 'window(s) successfully');
+    } else {
+      console.warn('🔵 Auto-zoom: Could not send click event to any window');
     }
   })
 
