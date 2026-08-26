@@ -6,12 +6,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
 node_modules
 dist
 dist-ssr
 *.local
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -23,8 +21,9 @@ dist-ssr
 *.sln
 *.sw?
 release/**
-
 # AHA Config (stored in user's app data directory, but adding for safety)
 aha-config.json
-
 # npx electron-builder --mac --win
+tempo/.tempo/
+tempo/node_modules/
+tempo/dist/
